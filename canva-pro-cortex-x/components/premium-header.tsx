@@ -111,7 +111,9 @@ export function PremiumHeader() {
 
         .logo-wrapper {
           animation: headerLogoAppear 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-          display: inline-block;
+          display: inline-flex;
+          align-items: center;
+          gap: 1rem;
           position: relative;
         }
 
@@ -254,6 +256,11 @@ export function PremiumHeader() {
 
         <div className="header-content">
           <div className="logo-wrapper">
+            <img
+              src="/canva-logo.jpg"
+              alt="Canva Logo"
+              className="circular-logo"
+            />
             <img
               src="/Cortex.png"
               alt="MI CORTEX X Logo"
