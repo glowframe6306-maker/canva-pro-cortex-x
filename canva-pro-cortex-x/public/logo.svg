@@ -1,0 +1,28 @@
+<svg width="420" height="140" viewBox="0 0 420 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mcxGradient" x1="0" y1="0" x2="420" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67E8F9"/>
+      <stop offset="0.5" stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="30" y1="20" x2="110" y2="110" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#DDF7FF"/>
+      <stop offset="1" stop-color="#7DD3FC"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="420" height="140" rx="28" fill="transparent"/>
+
+  <g transform="translate(18 18)">
+    <rect x="0" y="0" width="104" height="104" rx="28" fill="url(#mcxGradient)"/>
+    <rect x="10" y="10" width="84" height="84" rx="22" fill="#0F172A" fill-opacity="0.38" stroke="rgba(255,255,255,0.35)"/>
+    <path d="M27 68V36H43.5C49.2 36 53.5 40.3 53.5 46C53.5 51.7 49.2 56 43.5 56H33.5V68H27ZM33.5 50H42.5C45.9 50 48.5 47.4 48.5 44C48.5 40.6 45.9 38 42.5 38H33.5V50ZM67 68V36H73V68H67ZM85 68V36H91V68H85Z" fill="url(#glow)"/>
+    <path d="M58 73H28V79H58V73Z" fill="#DFF7FF" fill-opacity="0.8"/>
+  </g>
+
+  <g transform="translate(140 35)">
+    <text x="0" y="38" fill="#F8FBFF" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="700" letter-spacing="1.2">MI CORTEX X</text>
+    <text x="0" y="72" fill="#8DEBFF" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" letter-spacing="4.5">INC.</text>
+    <rect x="0" y="84" width="162" height="4" rx="2" fill="url(#mcxGradient)"/>
+  </g>
+</svg>
