@@ -1,0 +1,1360 @@
+# MI CORTEX X INC. — FULL WEBSITE MASTER PROMPT
+Build a complete, modern, premium, production-ready bilingual website for:
+
+**MI CORTEX X INC.**
+
+Website:
+**canva-pro-cortex-x.vercel.app**
+
+Use the uploaded **MI CORTEX X INC. logo/SVG** as the official visual identity.
+
+---
+
+## 1. CORE REQUIREMENT
+Create a complete functional digital-access subscription website, NOT just a static UI mockup.
+
+The website must have:
+
+- Customer-facing website
+- Customer registration/login
+- Customer dashboard
+- Pricing/plans
+- Order system
+- Bank transfer payment system
+- Payment receipt upload
+- Transaction ID
+- Admin dashboard
+- Order management
+- Customer management
+- Payment verification
+- Notifications
+- Support system
+- Invoice system
+- Sinhala/English language switching
+- Dark/Light mode
+- Fully responsive mobile design
+- Secure authentication
+- Database integration
+- Professional animations
+Every important button and form must actually work.
+
+---
+
+# 2. BRAND IDENTITY
+Company:
+
+**MI CORTEX X INC.**
+
+Website:
+
+**canva-pro-cortex-x.vercel.app**
+
+Use the uploaded MI CORTEX X INC. logo/SVG.
+
+### Visual identity
+Create a futuristic premium technology aesthetic inspired by the logo.
+
+Main colors:
+
+- Deep Black
+- Dark Navy
+- Neon Electric Blue
+- White
+- Subtle Blue Glow
+Use:
+
+- Glassmorphism
+- Backdrop blur
+- Transparent glass cards
+- Neon borders
+- Soft shadows
+- Gradient backgrounds
+- Subtle particles
+- Futuristic grid patterns
+- Glowing elements
+- Depth and layered backgrounds
+Do NOT make the interface excessively bright or cluttered.
+
+The final design should feel like a premium technology/SaaS platform.
+
+---
+
+# 3. ADVANCED ANIMATION SYSTEM
+Use professional animations throughout the website.
+
+Include:
+
+- Smooth page transitions
+- Fade-in
+- Fade-out
+- Slide-up
+- Slide-down
+- Slide-left/right
+- Scale-in
+- Zoom-in
+- Zoom-out
+- Blur-in
+- Blur-out
+- Glass reveal
+- Card hover animation
+- Button hover animation
+- Neon glow animation
+- Logo entrance animation
+- Smooth modal animations
+- Dropdown animations
+- Notification animations
+- Loading animations
+- Skeleton loading
+- Success animation
+- Error animation
+
+### Important
+Animations must be:
+
+- Smooth
+- Fast
+- Professional
+- GPU-friendly
+- Responsive
+Do NOT use excessive animation that makes the website slow.
+
+Respect `prefers-reduced-motion`.
+
+---
+
+# 4. HERO SECTION
+Create a cinematic premium hero section.
+
+Display the MI CORTEX X INC. logo with a subtle glow.
+
+Headline:
+
+**Create More. Design Better.**
+
+Supporting text:
+
+**Choose the plan that fits your needs.**
+
+Primary button:
+
+**BUY NOW**
+
+Secondary button:
+
+**VIEW PLANS**
+
+Add:
+
+- Animated gradient background
+- Floating blue particles
+- Soft blurred light effects
+- Glassmorphism elements
+- Subtle zoom/parallax effect
+- Animated glowing lines
+When the user scrolls, elements should smoothly reveal themselves.
+
+---
+
+# 5. BILINGUAL SYSTEM
+The complete website must support:
+
+**සිංහල**
+and
+**English**
+
+Header language switch:
+
+**සිංහල | English**
+
+When Sinhala is selected, all interface text must switch to Sinhala.
+
+When English is selected, all interface text must switch to English.
+
+Translate:
+
+- Navigation
+- Buttons
+- Pricing
+- Forms
+- Dashboard
+- Orders
+- Payment instructions
+- Notifications
+- Support
+- FAQ
+- Errors
+- Success messages
+- Admin interface where appropriate
+Save language preference using local storage/cookie.
+
+Do not randomly mix languages.
+
+---
+
+# 6. NAVIGATION HEADER
+Create a premium sticky header.
+
+Left:
+
+MI CORTEX X INC. logo
+
+Navigation:
+
+- Home
+- Plans
+- My Orders
+- Support
+Right:
+
+- Language switcher
+- Theme switcher
+- Account
+- Logout
+Use glassmorphism and backdrop blur.
+
+On scroll:
+
+Header should smoothly become slightly more opaque with a subtle blur.
+
+Mobile:
+
+Use an animated hamburger menu.
+
+---
+
+# 7. PRICING SECTION
+Create beautiful premium pricing cards.
+
+## WEEKLY
+**Rs. 200**
+
+Duration:
+**7 Days**
+
+Button:
+
+**BUY NOW**
+
+---
+
+## MONTHLY
+**Rs. 600**
+
+Duration:
+**30 Days**
+
+Badge:
+
+**POPULAR**
+
+Button:
+
+**BUY NOW**
+
+---
+
+## ANNUALLY
+**Rs. 2,000**
+
+Duration:
+**12 Months**
+
+Badge:
+
+**BEST VALUE**
+
+Button:
+
+**BUY NOW**
+
+---
+
+## LIFETIME
+**Rs. 5,000**
+
+Duration:
+**Lifetime**
+
+Badge:
+
+**ONE-TIME PAYMENT**
+
+Button:
+
+**BUY NOW**
+
+Important:
+
+Allow the admin to edit:
+
+- Price
+- Duration
+- Features
+- Badge
+- Availability
+- Plan status
+Do not make unsupported claims about any third-party service.
+
+---
+
+# 8. PLAN CARD ANIMATIONS
+Each plan card must have:
+
+- Glass effect
+- Blur background
+- Soft blue glow
+- Hover elevation
+- Smooth zoom effect
+- Border animation
+- Button glow
+On hover:
+
+Card slightly scales up.
+
+On mobile:
+
+Use subtle touch-friendly animation.
+
+---
+
+# 9. BUY FLOW
+When customer clicks:
+
+**BUY NOW**
+
+Open a premium order flow.
+
+Step indicator:
+
+**1. Plan → 2. Details → 3. Payment → 4. Confirmation**
+
+Show selected plan.
+
+Display:
+
+Plan name
+Price
+Duration
+
+Allow customer to confirm the selected plan.
+
+---
+
+# 10. CUSTOMER INFORMATION
+Collect:
+
+**Full Name**
+
+**WhatsApp Number**
+
+**Email**
+
+**Canva Account Email**
+
+**Additional Notes**
+
+Validate all fields.
+
+Use clean animated input fields.
+
+When focused:
+
+Input border should glow blue.
+
+Show validation errors clearly.
+
+---
+
+# 11. PAYMENT METHOD
+Only one payment method must be available:
+
+## 🏦 BANK TRANSFER
+Do NOT include:
+
+- Card Payment
+- QR Payment
+- Google Pay
+- Payment Gateway
+Bank details must NOT be hard-coded into the frontend.
+
+Admin must be able to configure:
+
+- Bank Name
+- Account Name
+- Account Number
+- Branch
+- Payment Instructions
+Use placeholders until the administrator enters real information.
+
+---
+
+# 12. PAYMENT PAGE
+Show:
+
+**Bank Transfer**
+
+Selected Plan
+Price
+Order ID
+
+Display configured bank details.
+
+Instructions:
+
+1. Transfer the required amount.
+2. Keep your payment receipt.
+3. Enter the transaction ID.
+4. Upload the payment receipt.
+5. Submit the order.
+
+---
+
+# 13. PAYMENT RECEIPT UPLOAD
+Customer must upload payment proof.
+
+Supported:
+
+- JPG
+- JPEG
+- PNG
+- PDF
+Add:
+
+**Transaction ID**
+
+Receipt upload must include:
+
+- Drag & drop
+- Browse file
+- Upload progress
+- Preview where supported
+- Remove file
+- Replace file
+Validate:
+
+- File type
+- File size
+- Upload success
+Do not make payment receipts publicly accessible.
+
+Store them securely.
+
+---
+
+# 14. ORDER SUBMISSION
+Button:
+
+**SUBMIT ORDER**
+
+Prevent duplicate submissions.
+
+Show loading state:
+
+**Submitting Order...**
+
+After successful submission:
+
+Show premium success animation.
+
+---
+
+# 15. ORDER SUCCESS PAGE
+Display:
+
+**Order Submitted Successfully**
+
+Show:
+
+Order ID
+Selected Plan
+Amount
+Payment Status
+Order Date
+
+Status:
+
+**Payment Verification Pending**
+
+Message:
+
+Your payment receipt has been received. Our team will verify your payment and process your order.
+
+Buttons:
+
+**VIEW MY ORDER**
+
+**CONTACT SUPPORT**
+
+---
+
+# 16. CUSTOMER DASHBOARD
+Create a premium glass dashboard.
+
+Display:
+
+**Welcome, [Customer Name]**
+
+Cards:
+
+Active Plan
+Order Status
+Payment Status
+Expiry Date
+
+Quick actions:
+
+- Buy Now
+- My Orders
+- Support
+- Profile
+Use animated statistics cards.
+
+---
+
+# 17. MY ORDERS
+Customer can view ONLY their own orders.
+
+Display:
+
+Order ID
+Plan
+Amount
+Date
+Status
+Expiry Date
+
+Statuses:
+
+- Pending
+- Payment Verification
+- Approved
+- Processing
+- Completed
+- Rejected
+- Cancelled
+- Expired
+Clicking an order opens detailed information.
+
+---
+
+# 18. CUSTOMER PROFILE
+Allow customer to view/edit:
+
+Full Name
+WhatsApp Number
+Email
+Canva Account Email
+
+Do not allow customers to modify:
+
+Payment status
+Order status
+Admin decisions
+Revenue
+Other customer data
+
+---
+
+# 19. ADMIN LOGIN
+Create a separate secure admin login.
+
+Route:
+
+`/admin`
+
+Use proper authentication.
+
+Use role-based access control.
+
+Never expose admin credentials in frontend code.
+
+Never store plaintext passwords.
+
+Use secure environment variables/authentication.
+
+---
+
+# 20. ADMIN DASHBOARD
+Create a premium futuristic admin dashboard.
+
+Statistics:
+
+**Total Orders**
+
+**Pending Orders**
+
+**Completed Orders**
+
+**Rejected Orders**
+
+**Cancelled Orders**
+
+**Total Customers**
+
+**Total Revenue**
+
+Use animated charts.
+
+Charts:
+
+- Orders by Plan
+- Revenue
+- Order Status
+- Daily/Monthly Orders
+
+---
+
+# 21. ADMIN ORDER MANAGEMENT
+Admin can:
+
+- View orders
+- Search orders
+- Filter orders
+- Open order details
+- View customer information
+- View receipt
+- Approve
+- Reject
+- Mark Processing
+- Mark Completed
+- Cancel
+Admin cancellation must be available when necessary.
+
+---
+
+# 22. PAYMENT VERIFICATION
+Admin sees:
+
+Customer
+Order ID
+Plan
+Amount
+Transaction ID
+Receipt
+Date
+
+Actions:
+
+**APPROVE PAYMENT**
+
+**REJECT PAYMENT**
+
+When approved:
+
+Update order status.
+
+When rejected:
+
+Allow admin to enter a rejection reason.
+
+Notify customer.
+
+---
+
+# 23. CUSTOMER MANAGEMENT
+Admin can view:
+
+Customer name
+Email
+WhatsApp
+Canva Account Email
+Orders
+Plan
+Status
+Registration date
+
+Admin must NOT see unnecessary sensitive information.
+
+---
+
+# 24. PLAN MANAGEMENT
+Admin can:
+
+- Create plan
+- Edit plan
+- Delete/disable plan
+- Change price
+- Change duration
+- Change features
+- Add badge
+- Remove badge
+- Enable/disable plan
+Initial plans:
+
+Weekly — Rs. 200
+Monthly — Rs. 600
+Annually — Rs. 2,000
+Lifetime — Rs. 5,000
+
+---
+
+# 25. BANK PAYMENT SETTINGS
+Create:
+
+**Admin → Settings → Payment Settings**
+
+Fields:
+
+Bank Name
+Account Name
+Account Number
+Branch
+Payment Instructions
+
+Allow administrator to update them anytime.
+
+Do not expose these values in source code.
+
+---
+
+# 26. NOTIFICATION SYSTEM
+Whenever an order is created, send notifications through:
+
+### WhatsApp
+Number:
+
+**0756390621**
+
+### Email
+**[imuhammadh1100@gmail.com](mailto:imuhammadh1100@gmail.com)**
+
+### Telegram
+**0756390621**
+
+### Website Dashboard
+Create in-app notifications.
+
+Admin should receive notifications for:
+
+- New order
+- New receipt
+- New customer
+- Support ticket
+Customer should receive notifications for:
+
+- Order submitted
+- Payment approved
+- Payment rejected
+- Order processing
+- Order completed
+- Order cancelled
+- Support reply
+
+---
+
+# 27. WHATSAPP
+Create WhatsApp contact buttons.
+
+Use:
+
+**0756390621**
+
+Provide:
+
+**CONTACT ON WHATSAPP**
+
+Do not automatically send sensitive credentials without explicit admin action.
+
+---
+
+# 28. TELEGRAM
+Create Telegram support/contact functionality using:
+
+**0756390621**
+
+Keep Telegram configuration editable from Admin Settings.
+
+---
+
+# 29. EMAIL
+Company email:
+
+**[imuhammadh1100@gmail.com](mailto:imuhammadh1100@gmail.com)**
+
+Use it for:
+
+- Customer support
+- Order notifications
+- Admin notifications
+- Payment updates
+Email configuration must use secure environment variables.
+
+---
+
+# 30. SUPPORT SYSTEM
+Create a support page.
+
+Options:
+
+WhatsApp
+Telegram
+Email
+
+Also create support tickets.
+
+Customer fields:
+
+Subject
+Order ID
+Message
+Optional attachment
+
+Admin can:
+
+Reply
+Change status
+Close ticket
+Set priority
+
+Statuses:
+
+Open
+In Progress
+Resolved
+Closed
+
+---
+
+# 31. SEARCH
+Admin search:
+
+Order ID
+Customer name
+Email
+WhatsApp
+Plan
+Transaction ID
+Status
+
+Customer search must only expose their own orders.
+
+---
+
+# 32. INVOICE
+Create professional digital invoices.
+
+Include:
+
+MI CORTEX X INC.
+Logo
+Invoice Number
+Order ID
+Customer Name
+Email
+Plan
+Amount
+Date
+Payment Status
+
+Allow:
+
+View
+Print
+Download
+
+---
+
+# 33. CANCELLATION POLICY
+Admin must be able to cancel an order/plan when necessary.
+
+Cancellation should require:
+
+- Reason
+- Confirmation
+Customer receives notification.
+
+---
+
+# 34. REFUND POLICY
+Website policy:
+
+**NO REFUNDS**
+
+Display this clearly in:
+
+- Terms & Conditions
+- Pricing information
+- Checkout/payment page where appropriate
+However, ensure the final policy text is written clearly and consistently with applicable laws and platform terms.
+
+---
+
+# 35. TERMS & CONDITIONS
+Create:
+
+Terms & Conditions
+Privacy Policy
+Refund Policy
+
+Do not claim official affiliation with Canva.
+
+Do not misrepresent third-party services.
+
+---
+
+# 36. DARK MODE
+Default:
+
+**DARK MODE**
+
+Theme:
+
+Black
+Deep Navy
+Neon Blue
+White
+
+Add:
+
+Dark Mode
+Light Mode
+
+Use smooth theme transition.
+
+---
+
+# 37. ADVANCED VISUAL EFFECTS
+Use premium effects carefully:
+
+- Background blur
+- Glass cards
+- Backdrop blur
+- Neon glow
+- Animated gradients
+- Floating particles
+- Soft light beams
+- Gradient borders
+- Depth shadows
+- Scroll reveal
+- Zoom effects
+- Blur reveal
+- Smooth parallax
+- Cursor-follow glow on desktop where appropriate
+Do not sacrifice performance.
+
+---
+
+# 38. RESPONSIVE DESIGN
+Perfectly support:
+
+Mobile
+Tablet
+Laptop
+Desktop
+Large screens
+
+Mobile pricing cards:
+
+Stack vertically.
+
+Forms:
+
+Easy to use with one hand.
+
+Receipt upload:
+
+Fully mobile compatible.
+
+Admin dashboard:
+
+Responsive.
+
+---
+
+# 39. ACCESSIBILITY
+Implement:
+
+- Keyboard navigation
+- Proper labels
+- Focus states
+- Accessible buttons
+- Good contrast
+- Screen-reader friendly structure
+- Reduced-motion support
+
+---
+
+# 40. SECURITY
+Implement:
+
+Secure authentication
+Role-based authorization
+Password hashing
+Protected admin routes
+Server-side validation
+Input sanitization
+File validation
+Private receipt storage
+Secure API endpoints
+Rate limiting where appropriate
+CSRF protection where appropriate
+Environment variables
+Secure session handling
+
+Never expose:
+
+API keys
+Database credentials
+Admin passwords
+Private receipts
+Secrets
+
+in frontend code.
+
+---
+
+# 41. DATABASE
+Use a proper database.
+
+Create:
+
+Users
+Admins
+Plans
+Orders
+Payments
+PaymentReceipts
+Notifications
+SupportTickets
+Invoices
+Settings
+
+Use proper relationships and indexes.
+
+---
+
+# 42. PERFORMANCE
+Optimize:
+
+Images
+SVG
+Animations
+API calls
+Database queries
+Lazy loading
+Code splitting
+
+Use skeleton loaders.
+
+Avoid unnecessary re-renders.
+
+The website should feel extremely fast.
+
+---
+
+# 43. SEO
+Title:
+
+**MI CORTEX X INC. | Digital Access Plans**
+
+Meta description:
+
+**MI CORTEX X INC. — Premium digital access plans with simple and secure ordering.**
+
+Include:
+
+- SEO metadata
+- Open Graph
+- Favicon
+- Sitemap
+- Robots.txt
+
+---
+
+# 44. FOOTER
+Display:
+
+MI CORTEX X INC.
+
+Quick Links:
+
+Home
+Plans
+My Orders
+Support
+
+Contact:
+
+WhatsApp
+Telegram
+Email
+
+Language:
+
+සිංහල | English
+
+Legal:
+
+Terms & Conditions
+Privacy Policy
+Refund Policy
+
+---
+
+# 45. ERROR PAGES
+Create:
+
+404
+403
+500
+
+Use premium animated error screens.
+
+---
+
+# 46. EMPTY STATES
+Example:
+
+**No Orders Yet**
+
+Message:
+
+You haven't placed any orders yet.
+
+Button:
+
+**BUY NOW**
+
+Use attractive illustrations/animations without making the interface childish.
+
+---
+
+# 47. LOADING STATES
+Every async action must have a loading state.
+
+Examples:
+
+Loading...
+Submitting...
+Uploading Receipt...
+Verifying...
+Saving...
+Processing...
+
+Disable duplicate submissions.
+
+---
+
+# 48. SUCCESS / ERROR UI
+Success:
+
+Green/positive confirmation styling while maintaining the overall design system.
+
+Error:
+
+Clear error message.
+
+Never display technical server errors to customers.
+
+---
+
+# 49. COMPONENT ARCHITECTURE
+Use reusable components:
+
+Header
+Footer
+Button
+PricingCard
+Modal
+Input
+FileUploader
+OrderCard
+NotificationBell
+DashboardCard
+AdminTable
+StatusBadge
+PaymentInstructions
+LanguageSwitcher
+ThemeSwitcher
+SupportTicket
+Invoice
+
+Keep code modular and maintainable.
+
+---
+
+# 50. IMPORTANT BRANDING RULE
+The website must clearly represent:
+
+**MI CORTEX X INC.**
+
+Do NOT present MI CORTEX X INC. as officially owned, operated, sponsored, endorsed, or affiliated with Canva unless explicit authorization exists.
+
+Use the company’s own branding.
+
+Do not copy Canva's exact website design.
+
+---
+
+# 51. FINAL CUSTOMER FLOW
+Customer:
+
+**HOME**
+
+↓
+
+**VIEW PLANS**
+
+↓
+
+**SELECT PLAN**
+
+↓
+
+**CUSTOMER DETAILS**
+
+↓
+
+**BANK TRANSFER**
+
+↓
+
+**VIEW BANK DETAILS**
+
+↓
+
+**MAKE PAYMENT**
+
+↓
+
+**ENTER TRANSACTION ID**
+
+↓
+
+**UPLOAD RECEIPT**
+
+↓
+
+**SUBMIT ORDER**
+
+↓
+
+**ORDER CONFIRMATION**
+
+↓
+
+**ADMIN VERIFICATION**
+
+↓
+
+**APPROVE / REJECT**
+
+↓
+
+**CUSTOMER NOTIFICATION**
+
+↓
+
+**PROCESSING**
+
+↓
+
+**DELIVERY VIA WHATSAPP / EMAIL**
+
+↓
+
+**ORDER COMPLETED**
+
+---
+
+# 52. FINAL ADMIN FLOW
+Admin Login
+
+↓
+
+Dashboard
+
+↓
+
+New Order Notification
+
+↓
+
+Open Order
+
+↓
+
+View Customer
+
+↓
+
+View Transaction ID
+
+↓
+
+View Receipt
+
+↓
+
+Verify Payment
+
+↓
+
+Approve / Reject
+
+↓
+
+Update Order
+
+↓
+
+Customer Notification
+
+↓
+
+Delivery
+
+↓
+
+Completed
+
+---
+
+# 53. FINAL REQUIREMENT
+Do not generate only a design prototype.
+
+Build a **fully functional production-ready web application**.
+
+All major buttons must work.
+
+All forms must work.
+
+Authentication must work.
+
+Database must work.
+
+Order system must work.
+
+Receipt upload must work.
+
+Admin verification must work.
+
+Notifications must work.
+
+Sinhala/English switching must work.
+
+Dark/Light mode must work.
+
+Responsive design must work.
+
+Animations must work smoothly.
+
+Security must be implemented correctly.
+
+The final interface must look:
+
+**PREMIUM**
+**FUTURISTIC**
+**MODERN**
+**PROFESSIONAL**
+**CLEAN**
+**FAST**
+**RESPONSIVE**
+
+Use the uploaded **MI CORTEX X INC. SVG/logo** as the main brand asset.
+
+Do not invent real banking information.
+
+Use placeholders for bank details until the administrator configures them.
+
+The final result should feel like a high-end professional technology platform rather than a basic template.

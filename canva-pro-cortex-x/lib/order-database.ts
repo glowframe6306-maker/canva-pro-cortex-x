@@ -1,10 +1,10 @@
 /**
- * Order database and persistence system
- * Stores and manages all orders with expiry information
+ * Order persistence backed by Neon PostgreSQL.
  */
 
-import fs from "node:fs/promises";
-import path from "node:path";
+import { getPostgresClient } from "@/lib/postgres";
+import type { DeliveryStatus } from "@/lib/order-submission";
+import type { NeonQueryFunction } from "@neondatabase/serverless";
 
 export type OrderStatus =
   | "PENDING"
@@ -17,33 +17,26 @@ export type OrderStatus =
   | "CANCELLED";
 
 export interface StoredOrder {
-  // Identifiers
   orderId: string;
   requestId?: string;
-  orderCreatedAt: string; // ISO timestamp when order was created
+  orderCreatedAt: string;
   createdAt?: string;
   updatedAt?: string;
   approvedAt?: string;
   rejectedAt?: string;
   expiredAt?: string;
-
-  // Customer info
   customerName: string;
   customerEmail: string;
   customerPhone?: string;
   canvaEmail: string;
-
-  // Payment info
   paymentMethod: "Free Trial" | "Bank Transfer" | "Other";
   paymentStatus?: "PENDING" | "APPROVED" | "PAID" | "REJECTED" | "FAILED";
-  paymentDetails?: string; // Reference number for bank transfer
+  paymentDetails?: string;
   receiptFilename?: string;
   receiptPath?: string;
   storageKey?: string;
-
-  // Plan info
-  selectedPlan: string; // Display name (e.g., "WEEKLY", "MONTHLY")
-  planPrice?: string; // final verified price for the order
+  selectedPlan: string;
+  planPrice?: string;
   mainPrice?: number;
   promotionName?: string;
   promotionId?: string;
@@ -56,18 +49,14 @@ export interface StoredOrder {
   discountAmount?: number;
   finalPrice?: number;
   additionalInfo?: string;
-
-  // Creation timestamps (for REQUEST_SENT status)
-  createdDate?: string; // YYYY-MM-DD - when order/request was created
-  createdTime?: string; // HH:mm:ss - when order/request was created
-
-  // Activation and expiry tracking
-  activatedAt?: string; // ISO timestamp when access was activated
-  activationDate?: string; // YYYY-MM-DD
-  activationTime?: string; // HH:mm:ss
-  expiryAt?: string; // ISO timestamp when plan expires (null for LIFETIME)
-  expiryDate?: string; // YYYY-MM-DD (or "NEVER" for LIFETIME)
-  expiryTime?: string; // HH:mm:ss (or "NEVER" for LIFETIME)
+  createdDate?: string;
+  createdTime?: string;
+  activatedAt?: string;
+  activationDate?: string;
+  activationTime?: string;
+  expiryAt?: string;
+  expiryDate?: string;
+  expiryTime?: string;
   durationDays?: number;
   planType?: "FREE_TRIAL" | "WEEKLY" | "MONTHLY" | "YEARLY" | "LIFETIME";
   duration?: string;
@@ -77,27 +66,21 @@ export interface StoredOrder {
   reminderStatus?: "PENDING" | "SENT" | "FAILED";
   reminderSentAt?: string;
   expiryNotificationStatus?: "PENDING" | "SENT" | "FAILED";
-
-  // Trial-specific
-  trialStartDate?: string; // YYYY-MM-DD - when trial was activated (if activated)
-  trialStartTime?: string; // HH:mm:ss - when trial was activated (if activated)
-  trialStartAt?: string; // ISO timestamp when trial was activated
-  trialEndDate?: string; // YYYY-MM-DD - calculated from trialStartDate + 3 days
-  trialEndTime?: string; // HH:mm:ss - calculated from trialStartDate + 3 days
-  trialEndAt?: string; // ISO timestamp when trial expires
-
-  // Status tracking
+  trialStartDate?: string;
+  trialStartTime?: string;
+  trialStartAt?: string;
+  trialEndDate?: string;
+  trialEndTime?: string;
+  trialEndAt?: string;
   status?: OrderStatus;
   expirationNotificationSent?: boolean;
-  expirationNotificationSentAt?: string; // ISO timestamp
-  requestReceivedAt?: string; // ISO timestamp when request was received
-  activationDeadlineAt?: string; // ISO timestamp for 24-hour deadline (requestReceivedAt + 24 hours)
-
-  // NEXT message tracking (sent automatically after successful main workflow message)
-  orderNextMessageSentAt?: string; // ISO timestamp when order NEXT message was sent
-  trialNextMessageSentAt?: string; // ISO timestamp when trial NEXT message was sent
-  reminderNextMessageSentAt?: string; // ISO timestamp when reminder NEXT message was sent
-  expiryNextMessageSentAt?: string; // ISO timestamp when expiry NEXT message was sent
+  expirationNotificationSentAt?: string;
+  requestReceivedAt?: string;
+  activationDeadlineAt?: string;
+  orderNextMessageSentAt?: string;
+  trialNextMessageSentAt?: string;
+  reminderNextMessageSentAt?: string;
+  expiryNextMessageSentAt?: string;
 }
 
 export type SubscriptionNotificationLog = {
@@ -110,171 +93,276 @@ export type SubscriptionNotificationLog = {
   error?: string;
 };
 
-const DEFAULT_ORDERS_DIR = path.join("C:\\Users\\Administrator\\CANVA PRO", "PAYMENTS");
+export type DeliveryKind = "telegram" | "receipt" | "next";
 
-function getOrdersDir(): string {
-  return process.env.ORDERS_DIR || DEFAULT_ORDERS_DIR;
+export type PersistedOrder = {
+  order: StoredOrder;
+  payloadHash: string;
+  telegramDeliveryStatus: DeliveryStatus;
+  receiptDeliveryStatus: DeliveryStatus;
+  nextDeliveryStatus: DeliveryStatus;
+};
+
+type OrderRow = {
+  order_data: unknown;
+  payload_hash: string | null;
+  telegram_delivery_status: DeliveryStatus;
+  receipt_delivery_status: DeliveryStatus;
+  next_delivery_status: DeliveryStatus;
+};
+
+type Queryable = Pick<NeonQueryFunction<false, false>, "query">;
+
+function getQueryClient(): Queryable {
+  return getPostgresClient();
 }
 
-function getOrdersFilePath(): string {
-  return path.join(getOrdersDir(), ".orders.json");
+function deserializeOrder(value: unknown): StoredOrder {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  if (!parsed || typeof parsed !== "object" || !("orderId" in parsed) || typeof parsed.orderId !== "string") {
+    throw new Error("Invalid order data returned by PostgreSQL.");
+  }
+  return parsed as StoredOrder;
 }
 
-function getNotificationLogPath(): string {
-  return path.join(getOrdersDir(), ".subscription-notification-log.json");
+function toPersistedOrder(row: OrderRow): PersistedOrder {
+  return {
+    order: deserializeOrder(row.order_data),
+    payloadHash: row.payload_hash || "",
+    telegramDeliveryStatus: row.telegram_delivery_status,
+    receiptDeliveryStatus: row.receipt_delivery_status,
+    nextDeliveryStatus: row.next_delivery_status,
+  };
 }
 
-/**
- * Ensure the orders directory and database file exist
- */
-async function ensureOrdersDatabase() {
-  const ordersDir = getOrdersDir();
-  const ordersFile = getOrdersFilePath();
+const persistedOrderColumns = `
+  order_data,
+  payload_hash,
+  telegram_delivery_status,
+  receipt_delivery_status,
+  next_delivery_status
+`;
 
-  await fs.mkdir(ordersDir, { recursive: true });
-
-  try {
-    await fs.access(ordersFile);
-  } catch {
-    // File doesn't exist, create empty database
-    await fs.writeFile(ordersFile, JSON.stringify({ orders: [], version: 1 }, null, 2), "utf8");
+export class IdempotencyConflictError extends Error {
+  constructor() {
+    super("The idempotency key was previously used with different order details.");
+    this.name = "IdempotencyConflictError";
   }
 }
 
-function parseOrdersDatabase(raw: string): StoredOrder[] {
-  const sanitized = String(raw || "").replace(/^\uFEFF/, "").trim();
-  if (!sanitized) return [];
+export async function createOrderIdempotently(
+  order: StoredOrder,
+  idempotencyKey: string,
+  payloadHash: string,
+): Promise<{ persisted: PersistedOrder; created: boolean }> {
+  const rows = await getQueryClient().query(
+    `INSERT INTO orders (
+       order_id, request_id, idempotency_key, payload_hash, canva_email, payment_method,
+       status, order_data
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING ${persistedOrderColumns}`,
+    [
+      order.orderId,
+      order.requestId || null,
+      idempotencyKey,
+      payloadHash,
+      order.canvaEmail,
+      order.paymentMethod,
+      order.status || "PENDING",
+      JSON.stringify(order),
+    ],
+  ) as OrderRow[];
 
-  const parsed = JSON.parse(sanitized);
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.orders)) {
-    return [];
-  }
+  if (rows[0]) return { persisted: toPersistedOrder(rows[0]), created: true };
 
-  return parsed.orders as StoredOrder[];
+  const existing = await getQueryClient().query(
+    `SELECT ${persistedOrderColumns}
+     FROM orders
+     WHERE idempotency_key = $1
+     LIMIT 1`,
+    [idempotencyKey],
+  ) as OrderRow[];
+
+  if (!existing[0]) throw new Error("Order idempotency record could not be loaded.");
+  const persisted = toPersistedOrder(existing[0]);
+  if (persisted.payloadHash !== payloadHash) throw new IdempotencyConflictError();
+  return { persisted, created: false };
 }
 
-/**
- * Read all orders from the database
- */
-export async function getAllOrders(): Promise<StoredOrder[]> {
-  try {
-    await ensureOrdersDatabase();
-    const ordersFile = getOrdersFilePath();
-    const raw = await fs.readFile(ordersFile, "utf8");
-    return parseOrdersDatabase(raw);
-  } catch (error) {
-    console.error("Error reading orders database:", error);
-    throw error;
-  }
+export async function getOrderByIdempotencyKey(key: string): Promise<PersistedOrder | null> {
+  const rows = await getQueryClient().query(
+    `SELECT ${persistedOrderColumns} FROM orders WHERE idempotency_key = $1 LIMIT 1`,
+    [key],
+  ) as OrderRow[];
+  return rows[0] ? toPersistedOrder(rows[0]) : null;
 }
 
-export async function getSubscriptionNotificationLogs(): Promise<SubscriptionNotificationLog[]> {
-  try {
-    await ensureOrdersDatabase();
-    const parsed = JSON.parse(await fs.readFile(getNotificationLogPath(), "utf8"));
-    return Array.isArray(parsed.logs) ? parsed.logs : [];
-  } catch {
-    return [];
-  }
+export async function claimDelivery(orderId: string, kind: DeliveryKind): Promise<boolean> {
+  const column = {
+    telegram: "telegram_delivery_status",
+    receipt: "receipt_delivery_status",
+    next: "next_delivery_status",
+  }[kind];
+  const rows = await getQueryClient().query(
+    `UPDATE orders
+     SET ${column} = 'SENDING', updated_at = now()
+     WHERE order_id = $1 AND ${column} IN ('PENDING', 'FAILED')
+     RETURNING order_id`,
+    [orderId],
+  );
+  return rows.length > 0;
 }
 
-export async function appendSubscriptionNotificationLog(log: SubscriptionNotificationLog): Promise<void> {
-  await ensureOrdersDatabase();
-  const logs = await getSubscriptionNotificationLogs();
-  logs.push(log);
-  await fs.writeFile(getNotificationLogPath(), JSON.stringify({ logs }, null, 2), "utf8");
-}
-
-/**
- * Find an order by ID
- */
-export async function getOrderById(orderId: string): Promise<StoredOrder | null> {
-  const orders = await getAllOrders();
-  return orders.find((o) => o.orderId === orderId) || null;
-}
-
-export async function getOrderByOrderNumber(orderNumber: string): Promise<StoredOrder | null> {
-  const orders = await getAllOrders();
-  const normalized = String(orderNumber || "").trim();
-  if (!normalized) return null;
-  return (
-    orders.find((o) => o.orderId === normalized || o.requestId === normalized) ||
-    orders.find((o) => (o.orderId || "").toLowerCase() === normalized.toLowerCase()) ||
-    orders.find((o) => (o.requestId || "").toLowerCase() === normalized.toLowerCase()) ||
-    null
+export async function setDeliveryStatus(orderId: string, kind: DeliveryKind, status: DeliveryStatus): Promise<void> {
+  const column = {
+    telegram: "telegram_delivery_status",
+    receipt: "receipt_delivery_status",
+    next: "next_delivery_status",
+  }[kind];
+  await getQueryClient().query(
+    `UPDATE orders SET ${column} = $1, updated_at = now() WHERE order_id = $2`,
+    [status, orderId],
   );
 }
 
-/**
- * Save a new order to the database
- */
+export async function getNextOrderCounter(kind: "MI" | "FT", date: string): Promise<number> {
+  const rows = await getQueryClient().query(
+    `INSERT INTO order_counters (counter_date, counter_kind, last_value)
+     VALUES ($1, $2, 1)
+     ON CONFLICT (counter_date, counter_kind)
+     DO UPDATE SET last_value = order_counters.last_value + 1
+     RETURNING last_value`,
+    [date, kind],
+  ) as Array<{ last_value: number | string }>;
+  const value = Number(rows[0]?.last_value);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error("Unable to allocate an order number.");
+  return value;
+}
+
+export async function getAllOrders(): Promise<StoredOrder[]> {
+  const rows = await getQueryClient().query(
+    "SELECT order_data FROM orders ORDER BY created_at ASC",
+  ) as Array<{ order_data: unknown }>;
+  return rows.map((row) => deserializeOrder(row.order_data));
+}
+
+export async function getSubscriptionNotificationLogs(): Promise<SubscriptionNotificationLog[]> {
+  const rows = await getQueryClient().query(
+    `SELECT request_id, plan, notification_type, scheduled_time, attempt_time, status, error
+     FROM subscription_notification_logs
+     ORDER BY id ASC`,
+  ) as Array<{
+    request_id: string;
+    plan: string;
+    notification_type: string;
+    scheduled_time: string | null;
+    attempt_time: string;
+    status: "SENT" | "FAILED";
+    error: string | null;
+  }>;
+  return rows.map((row) => ({
+    requestId: row.request_id,
+    plan: row.plan,
+    notificationType: row.notification_type,
+    scheduledTime: row.scheduled_time || undefined,
+    attemptTime: row.attempt_time,
+    status: row.status,
+    error: row.error || undefined,
+  }));
+}
+
+export async function appendSubscriptionNotificationLog(log: SubscriptionNotificationLog): Promise<void> {
+  await getQueryClient().query(
+    `INSERT INTO subscription_notification_logs (
+       request_id, plan, notification_type, scheduled_time, attempt_time, status, error
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [log.requestId, log.plan, log.notificationType, log.scheduledTime || null, log.attemptTime, log.status, log.error || null],
+  );
+}
+
+export async function getOrderById(orderId: string): Promise<StoredOrder | null> {
+  const rows = await getQueryClient().query(
+    "SELECT order_data FROM orders WHERE order_id = $1 LIMIT 1",
+    [orderId],
+  ) as Array<{ order_data: unknown }>;
+  return rows[0] ? deserializeOrder(rows[0].order_data) : null;
+}
+
+export async function getOrderByOrderNumber(orderNumber: string): Promise<StoredOrder | null> {
+  const normalized = String(orderNumber || "").trim();
+  if (!normalized) return null;
+  const rows = await getQueryClient().query(
+    `SELECT order_data FROM orders
+     WHERE order_id = $1 OR request_id = $1
+        OR lower(order_id) = lower($1) OR lower(request_id) = lower($1)
+     ORDER BY CASE WHEN order_id = $1 OR request_id = $1 THEN 0 ELSE 1 END
+     LIMIT 1`,
+    [normalized],
+  ) as Array<{ order_data: unknown }>;
+  return rows[0] ? deserializeOrder(rows[0].order_data) : null;
+}
+
 export async function saveOrder(order: StoredOrder): Promise<void> {
-  try {
-    await ensureOrdersDatabase();
-    const ordersFile = getOrdersFilePath();
-    const orders = await getAllOrders();
-
-    // Avoid duplicates
-    const existingIndex = orders.findIndex((o) => o.orderId === order.orderId);
-    if (existingIndex >= 0) {
-      orders[existingIndex] = { ...orders[existingIndex], ...order };
-    } else {
-      orders.push(order);
-    }
-
-    await fs.writeFile(ordersFile, JSON.stringify({ orders, version: 1 }, null, 2), "utf8");
-  } catch (error) {
-    console.error("Error saving order:", error);
-    throw error;
-  }
+  await getQueryClient().query(
+    `INSERT INTO orders (order_id, request_id, canva_email, payment_method, status, order_data)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+     ON CONFLICT (order_id) DO UPDATE SET
+       request_id = EXCLUDED.request_id,
+       canva_email = EXCLUDED.canva_email,
+       payment_method = EXCLUDED.payment_method,
+       status = EXCLUDED.status,
+       order_data = EXCLUDED.order_data,
+       updated_at = now()`,
+    [order.orderId, order.requestId || null, order.canvaEmail, order.paymentMethod, order.status || "PENDING", JSON.stringify(order)],
+  );
 }
 
-/**
- * Update an existing order
- */
 export async function updateOrder(orderId: string, updates: Partial<StoredOrder>): Promise<StoredOrder | null> {
-  try {
-    await ensureOrdersDatabase();
-    const ordersFile = getOrdersFilePath();
-    const orders = await getAllOrders();
-
-    const index = orders.findIndex((o) => o.orderId === orderId);
-    if (index === -1) {
-      return null;
-    }
-
-    orders[index] = { ...orders[index], ...updates, orderId, updatedAt: new Date().toISOString() }; // Ensure orderId is never changed
-    await fs.writeFile(ordersFile, JSON.stringify({ orders, version: 1 }, null, 2), "utf8");
-
-    return orders[index];
-  } catch (error) {
-    console.error("Error updating order:", error);
-    throw error;
-  }
+  const updatedAt = new Date().toISOString();
+  const safeUpdates = { ...updates, orderId, updatedAt };
+  const removedKeys = Object.entries(updates)
+    .filter(([, value]) => value === undefined)
+    .map(([key]) => key);
+  const rows = await getQueryClient().query(
+    `UPDATE orders
+     SET order_data = (order_data || $1::jsonb) - $2::text[],
+         status = COALESCE($3, status),
+         canva_email = COALESCE($4, canva_email),
+         payment_method = COALESCE($5, payment_method),
+         updated_at = now()
+     WHERE order_id = $6
+     RETURNING order_data`,
+    [
+      JSON.stringify(safeUpdates),
+      removedKeys,
+      updates.status || null,
+      updates.canvaEmail || null,
+      updates.paymentMethod || null,
+      orderId,
+    ],
+  ) as Array<{ order_data: unknown }>;
+  return rows[0] ? deserializeOrder(rows[0].order_data) : null;
 }
 
-/**
- * Get all active orders that should receive expiration notifications
- * Returns orders with status ACTIVE and expiryAt reached
- */
+export async function getOrderSnapshot(orderId: string): Promise<PersistedOrder | null> {
+  const rows = await getQueryClient().query(
+    `SELECT ${persistedOrderColumns} FROM orders WHERE order_id = $1 LIMIT 1`,
+    [orderId],
+  ) as OrderRow[];
+  return rows[0] ? toPersistedOrder(rows[0]) : null;
+}
+
 export async function getOrdersReadyForExpiration(): Promise<StoredOrder[]> {
   const orders = await getAllOrders();
   const now = new Date();
-
   return orders.filter((order) => {
-    if (!order.expiryAt) {
-      return false;
-    }
+    if (!order.expiryAt) return false;
     const effectiveStatus = order.status || "PENDING";
-    if ((effectiveStatus !== "ACTIVE" && effectiveStatus !== "EXPIRING_IN_1_DAY") || order.expirationNotificationSent) {
-      return false;
-    }
-    try {
-      const expiryDate = new Date(order.expiryAt);
-      return !Number.isNaN(expiryDate.getTime()) && now >= expiryDate;
-    } catch {
-      return false;
-    }
+    if ((effectiveStatus !== "ACTIVE" && effectiveStatus !== "EXPIRING_IN_1_DAY") || order.expirationNotificationSent) return false;
+    const expiryDate = new Date(order.expiryAt);
+    return !Number.isNaN(expiryDate.getTime()) && now >= expiryDate;
   });
 }
 
@@ -290,12 +378,9 @@ export async function getOrdersReadyForReminder(): Promise<StoredOrder[]> {
   });
 }
 
-/**
- * Get all paid orders grouped by status
- */
 export async function getOrdersByStatus(status: OrderStatus): Promise<StoredOrder[]> {
   const orders = await getAllOrders();
-  return orders.filter((o) => (o.status || "PENDING") === status);
+  return orders.filter((order) => (order.status || "PENDING") === status);
 }
 
 export function normalizeStoredStatus(status?: string): OrderStatus {
@@ -303,54 +388,38 @@ export function normalizeStoredStatus(status?: string): OrderStatus {
   if (status === "REQUEST_SENT") return "PENDING";
   if (status === "APPROVED") return "ACTIVE";
   return ["PENDING", "ACTIVE", "EXPIRING_IN_1_DAY", "EXPIRED", "REJECTED", "CANCELLED"].includes(status)
-    ? (status as OrderStatus)
+    ? status as OrderStatus
     : "PENDING";
 }
 
 export async function activateOrderIfPending(orderId: string, updates: Partial<StoredOrder>): Promise<StoredOrder | null> {
-  const orders = await getAllOrders();
-  const index = orders.findIndex((order) => order.orderId === orderId);
-  if (index === -1) {
-    return null;
-  }
-
-  const current = orders[index];
-  const effectiveCurrentStatus = normalizeStoredStatus(current.status);
-  if (effectiveCurrentStatus !== "PENDING") {
-    return null;
-  }
-
-  const updated: StoredOrder = {
-    ...current,
-    ...updates,
-    status: "ACTIVE",
-    updatedAt: new Date().toISOString(),
-  };
-
-  orders[index] = updated;
-  await fs.writeFile(getOrdersFilePath(), JSON.stringify({ orders, version: 1 }, null, 2), "utf8");
-  return updated;
+  const updatedAt = new Date().toISOString();
+  const safeUpdates = { ...updates, orderId, status: "ACTIVE", updatedAt };
+  const rows = await getQueryClient().query(
+    `UPDATE orders
+     SET order_data = order_data || $1::jsonb,
+         status = 'ACTIVE',
+         updated_at = now()
+     WHERE order_id = $2 AND status IN ('PENDING', 'REQUEST_SENT')
+     RETURNING order_data`,
+    [JSON.stringify(safeUpdates), orderId],
+  ) as Array<{ order_data: unknown }>;
+  return rows[0] ? deserializeOrder(rows[0].order_data) : null;
 }
 
-/**
- * Mark an order as having received expiration notification
- */
 export async function markExpirationNotificationSent(orderId: string): Promise<StoredOrder | null> {
+  const sentAt = new Date().toISOString();
   return updateOrder(orderId, {
     expirationNotificationSent: true,
-    expirationNotificationSentAt: new Date().toISOString(),
+    expirationNotificationSentAt: sentAt,
     expiryNotificationStatus: "SENT",
-    expiredAt: new Date().toISOString(),
+    expiredAt: sentAt,
     status: "EXPIRED",
   });
 }
 
 export async function markReminderSent(orderId: string, sentAt: string): Promise<StoredOrder | null> {
-  return updateOrder(orderId, {
-    reminderStatus: "SENT",
-    reminderSentAt: sentAt,
-    status: "EXPIRING_IN_1_DAY",
-  });
+  return updateOrder(orderId, { reminderStatus: "SENT", reminderSentAt: sentAt, status: "EXPIRING_IN_1_DAY" });
 }
 
 export async function markReminderFailed(orderId: string): Promise<StoredOrder | null> {
@@ -377,15 +446,12 @@ export async function markExpiryNextMessageSent(orderId: string, sentAt: string)
   return updateOrder(orderId, { expiryNextMessageSentAt: sentAt });
 }
 
-/**
- * Check if a Canva email has already been used for a free trial
- * Email is normalized (trimmed, lowercase) for consistent comparison
- */
 export async function hasFreeTrial(normalizedCanvaEmail: string): Promise<boolean> {
-  const orders = await getAllOrders();
-  return orders.some((order) =>
-    order.paymentMethod === "Free Trial" &&
-    order.canvaEmail &&
-    order.canvaEmail.toLowerCase().trim() === normalizedCanvaEmail.toLowerCase().trim()
+  const rows = await getQueryClient().query(
+    `SELECT 1 FROM orders
+     WHERE payment_method = 'Free Trial' AND lower(btrim(canva_email)) = lower(btrim($1))
+     LIMIT 1`,
+    [normalizedCanvaEmail],
   );
+  return rows.length > 0;
 }

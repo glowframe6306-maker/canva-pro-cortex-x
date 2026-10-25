@@ -12,7 +12,7 @@ import { startExpirationChecker } from "@/lib/expiration-checker";
 export function InitializeApp() {
   // Initialize expiration checker to run every 5 minutes
   // This will check for expired orders and send notifications
-  if (process.env.NODE_ENV !== "test") {
+  if (process.env.NODE_ENV !== "test" && process.env.NEXT_PHASE !== "phase-production-build") {
     try {
       startExpirationChecker(5); // Check every 5 minutes
     } catch (error) {

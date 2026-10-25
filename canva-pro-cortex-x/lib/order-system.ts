@@ -1,5 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
+import { getNextOrderCounter } from "@/lib/order-database";
+import { getPostgresClient } from "@/lib/postgres";
 
 export type ReceiptStorageResult = {
   filename: string;
@@ -8,23 +9,6 @@ export type ReceiptStorageResult = {
   saved: boolean;
   reason?: string;
 };
-
-const DEFAULT_LOCAL_PAYMENT_DIR = path.join("C:\\Users\\Administrator\\CANVA PRO", "PAYMENTS");
-
-const isProductionWithPersistentStorage = () =>
-  process.env.NODE_ENV === "production" && !!(process.env.PERSISTENT_STORAGE_PATH || process.env.UPLOADS_DIR);
-
-function getLocalPaymentDir() {
-  return process.env.LOCAL_PAYMENT_DIR || DEFAULT_LOCAL_PAYMENT_DIR;
-}
-
-function getPersistentStorageDir() {
-  return process.env.PERSISTENT_STORAGE_PATH || process.env.UPLOADS_DIR || "";
-}
-
-async function ensureDirectory(dirPath: string) {
-  await fs.mkdir(dirPath, { recursive: true });
-}
 
 function getFileExtension(fileName: string, mimeType?: string) {
   const extFromName = path.extname(fileName || "").toLowerCase();
@@ -39,67 +23,25 @@ function getFileExtension(fileName: string, mimeType?: string) {
   return mapped[mimeType || ""] || ".jpg";
 }
 
-async function readOrderCounter(storageDir: string) {
-  const counterPath = path.join(storageDir, ".order-counter.json");
-  try {
-    const raw = await fs.readFile(counterPath, "utf8");
-    const parsed = JSON.parse(raw);
-    return Number(parsed.last || 0);
-  } catch {
-    return 0;
-  }
-}
-
-async function writeOrderCounter(storageDir: string, value: number) {
-  const counterPath = path.join(storageDir, ".order-counter.json");
-  await fs.writeFile(counterPath, JSON.stringify({ last: value }), "utf8");
-}
-
 export async function generateOrderNumber() {
-  const dateStamp = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: process.env.TZ || "Asia/Colombo",
-  }).format(new Date()).replace(/-/g, "");
-
-  if (process.env.NODE_ENV !== "production" || getPersistentStorageDir()) {
-    const storageDir = getPersistentStorageDir() || getLocalPaymentDir();
-    await ensureDirectory(storageDir);
-
-    const lastValue = await readOrderCounter(storageDir);
-    const nextValue = lastValue + 1;
-    await writeOrderCounter(storageDir, nextValue);
-
-    return `MI-${dateStamp}-${String(nextValue).padStart(4, "0")}`;
-  }
-
-  const runtimeCounter = (globalThis as typeof globalThis & { __micortexOrderCounter?: number }).__micortexOrderCounter ?? 0;
-  const nextValue = runtimeCounter + 1;
-  (globalThis as typeof globalThis & { __micortexOrderCounter?: number }).__micortexOrderCounter = nextValue;
-
+  const dateStamp = getDateStamp();
+  const nextValue = await getNextOrderCounter("MI", dateStamp);
   return `MI-${dateStamp}-${String(nextValue).padStart(4, "0")}`;
 }
 
 export async function generateFreeTrialRequestId() {
-  const storageDir = getPersistentStorageDir() || getLocalPaymentDir();
-  await ensureDirectory(storageDir);
-  const counterPath = path.join(storageDir, ".free-trial-counter.json");
-  let lastValue = 0;
-  try {
-    lastValue = Number(JSON.parse(await fs.readFile(counterPath, "utf8")).last || 0);
-  } catch {
-    lastValue = 0;
-  }
-  const nextValue = lastValue + 1;
-  await fs.writeFile(counterPath, JSON.stringify({ last: nextValue }), "utf8");
-  const dateStamp = new Intl.DateTimeFormat("en-CA", {
+  const dateStamp = getDateStamp();
+  const nextValue = await getNextOrderCounter("FT", dateStamp);
+  return `FT-${dateStamp}-${String(nextValue).padStart(4, "0")}`;
+}
+
+function getDateStamp() {
+  return new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     timeZone: process.env.TZ || "Asia/Colombo",
   }).format(new Date()).replace(/-/g, "");
-  return `FT-${dateStamp}-${String(nextValue).padStart(4, "0")}`;
 }
 
 export async function saveReceiptFile(file: { name: string; type: string; buffer: Buffer }, orderId: string): Promise<ReceiptStorageResult> {
@@ -117,26 +59,36 @@ export async function saveReceiptFile(file: { name: string; type: string; buffer
   const targetExtension = getFileExtension(file.name, file.type);
   const targetFilename = `${orderId}${targetExtension}`;
 
-  const storageDir = getPersistentStorageDir() || getLocalPaymentDir();
-  if (process.env.NODE_ENV === "production" && !getPersistentStorageDir()) {
-    return {
-      filename: targetFilename,
-      storageKey: targetFilename,
-      path: "",
-      saved: false,
-      reason: "No persistent production upload storage configured.",
-    };
-  }
-
-  await ensureDirectory(storageDir);
-  const targetPath = path.join(storageDir, targetFilename);
-  await fs.writeFile(targetPath, file.buffer);
+  await getPostgresClient().query(
+    `INSERT INTO order_receipts (order_id, filename, mime_type, content)
+     VALUES ($1, $2, $3, decode($4, 'base64'))
+     ON CONFLICT (order_id) DO UPDATE SET
+       filename = EXCLUDED.filename,
+       mime_type = EXCLUDED.mime_type,
+       content = EXCLUDED.content`,
+    [orderId, targetFilename, file.type, file.buffer.toString("base64")],
+  );
 
   return {
     filename: targetFilename,
     storageKey: targetFilename,
-    path: targetPath,
+    path: `/api/admin/orders/${encodeURIComponent(orderId)}/receipt`,
     saved: true,
+  };
+}
+
+export async function getReceiptFile(orderId: string): Promise<{ filename: string; mimeType: string; buffer: Buffer } | null> {
+  const rows = await getPostgresClient().query(
+    `SELECT filename, mime_type, encode(content, 'base64') AS content_base64
+     FROM order_receipts WHERE order_id = $1 LIMIT 1`,
+    [orderId],
+  ) as Array<{ filename: string; mime_type: string; content_base64: string }>;
+  const receipt = rows[0];
+  if (!receipt) return null;
+  return {
+    filename: receipt.filename,
+    mimeType: receipt.mime_type,
+    buffer: Buffer.from(receipt.content_base64, "base64"),
   };
 }
 
@@ -152,5 +104,5 @@ export function resolveReceiptMime(fileName: string, fileType: string) {
 }
 
 export function isProductionWithoutStorage() {
-  return process.env.NODE_ENV === "production" && !getPersistentStorageDir();
+  return process.env.NODE_ENV === "production" && !(process.env.POSTGRES_URL || process.env.DATABASE_URL);
 }

@@ -73,7 +73,9 @@ export async function GET(request: NextRequest) {
         rejectedAt: order.rejectedAt || null,
         expiredAt: order.expiredAt || null,
         paymentProof: order.receiptFilename || null,
-        paymentProofUrl: order.receiptPath || null,
+        paymentProofUrl: order.receiptFilename
+          ? `/api/admin/orders/${encodeURIComponent(order.orderId)}/receipt`
+          : null,
       })),
     });
   } catch (error) {

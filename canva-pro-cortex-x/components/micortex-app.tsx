@@ -214,10 +214,60 @@ export default function MicortexAppPremium() {
     message: string;
   } | null>(null);
   const customerServiceSubmittingRef = useRef(false);
+  const submissionKeysRef = useRef<{ order: { fingerprint: string; key: string } | null; trial: { fingerprint: string; key: string } | null }>({
+    order: null,
+    trial: null,
+  });
   const aboutModalContentRef = useRef<HTMLDivElement>(null);
   const aboutCanvaModalContentRef = useRef<HTMLDivElement>(null);
   const plansSectionRef = useRef<HTMLDivElement>(null);
   const aboutPreviousOverflowRef = useRef<string | null>(null);
+
+  const getSubmissionKey = async (kind: "order" | "trial", fingerprint: string) => {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fingerprint));
+    const fingerprintHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    const storageKey = `cortex-order-idempotency-${kind}`;
+    const existing = submissionKeysRef.current[kind];
+    if (existing?.fingerprint === fingerprintHash) return existing.key;
+
+    try {
+      const saved = sessionStorage.getItem(storageKey);
+      if (saved) {
+        const parsed: unknown = JSON.parse(saved);
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          "fingerprint" in parsed &&
+          parsed.fingerprint === fingerprintHash &&
+          "key" in parsed &&
+          typeof parsed.key === "string"
+        ) {
+          submissionKeysRef.current[kind] = { fingerprint: fingerprintHash, key: parsed.key };
+          return parsed.key;
+        }
+      }
+    } catch {
+      console.warn("Unable to read the order retry key from session storage.");
+    }
+
+    const next = { fingerprint: fingerprintHash, key: crypto.randomUUID() };
+    submissionKeysRef.current[kind] = next;
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      console.warn("Unable to persist the order retry key for this browser session.");
+    }
+    return next.key;
+  };
+
+  const clearSubmissionKey = (kind: "order" | "trial") => {
+    submissionKeysRef.current[kind] = null;
+    try {
+      sessionStorage.removeItem(`cortex-order-idempotency-${kind}`);
+    } catch {
+      console.warn("Unable to clear the completed order retry key.");
+    }
+  };
 
   useEffect(() => {
     fetch("/api/promotions/active")
@@ -514,6 +564,19 @@ export default function MicortexAppPremium() {
     setMessage("Processing your order...");
 
     try {
+      const fingerprint = JSON.stringify([
+        orderForm.fullName,
+        orderForm.email,
+        orderForm.whatsapp,
+        orderForm.canvaEmail,
+        orderForm.remarks,
+        planDetail?.id,
+        paymentForm.referenceNumber,
+        paymentForm.receiptFile.name,
+        paymentForm.receiptFile.size,
+        paymentForm.receiptFile.lastModified,
+      ]);
+      const idempotencyKey = await getSubmissionKey("order", fingerprint);
       const formData = new FormData();
       formData.append("customerName", orderForm.fullName);
       formData.append("customerPhone", orderForm.whatsapp);
@@ -528,7 +591,11 @@ export default function MicortexAppPremium() {
       formData.append("receiptName", paymentForm.receiptFile.name);
       formData.append("receipt", paymentForm.receiptFile);
 
-      const response = await fetch("/api/orders", { method: "POST", body: formData });
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: formData,
+      });
       const result = await response.json();
 
       if (!response.ok || !result.ok) {
@@ -544,6 +611,7 @@ export default function MicortexAppPremium() {
         price: planDetail?.price || 0,
       });
       setStep("success");
+      clearSubmissionKey("order");
       setLoading(false);
     } catch (error) {
       console.error("Order error:", error);
@@ -562,6 +630,13 @@ export default function MicortexAppPremium() {
     setMessage("Activating your free trial...");
 
     try {
+      const fingerprint = JSON.stringify([
+        trialForm.fullName,
+        trialForm.email,
+        trialForm.whatsapp,
+        trialForm.canvaEmail,
+      ]);
+      const idempotencyKey = await getSubmissionKey("trial", fingerprint);
       const now = new Date();
       const trialEnd = new Date(now);
       trialEnd.setDate(trialEnd.getDate() + 3);
@@ -576,7 +651,11 @@ export default function MicortexAppPremium() {
       formData.append("paymentMethod", "Free Trial");
       formData.append("orderDate", now.toISOString());
 
-      const response = await fetch("/api/orders", { method: "POST", body: formData });
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: formData,
+      });
       const result = await response.json();
 
       if (!response.ok || !result.ok) {
@@ -598,6 +677,7 @@ export default function MicortexAppPremium() {
         trialEndTime: result.trialEndTime,
       });
       setStep("success");
+      clearSubmissionKey("trial");
       setLoading(false);
     } catch (error) {
       console.error("Trial error:", error);

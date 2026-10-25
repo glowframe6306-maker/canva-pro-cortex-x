@@ -1,9 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "node:fs/promises";
+import {
+  classifyTelegramResponse,
+  getIdempotencyAction,
+  getMissingTelegramConfiguration,
+  getSafeOrderSubmissionDiagnostic,
+  getTelegramErrorCode,
+  hashOrderSubmission,
+} from "@/lib/order-submission";
 import path from "node:path";
 import { generateFreeTrialRequestId, generateOrderNumber, resolveReceiptMime, saveReceiptFile } from "@/lib/order-system";
 import { getDateTimeInTimezone, calculateExpiry, getPlanDurationDisplay, planNameToPlanType } from "@/lib/expiry-calculator";
-import { saveOrder, updateOrder, hasFreeTrial, markOrderNextMessageSent, markTrialNextMessageSent } from "@/lib/order-database";
+import {
+  claimDelivery,
+  createOrderIdempotently,
+  getOrderByIdempotencyKey,
+  getOrderSnapshot,
+  hasFreeTrial,
+  IdempotencyConflictError,
+  markOrderNextMessageSent,
+  markTrialNextMessageSent,
+  setDeliveryStatus,
+} from "@/lib/order-database";
 import { buildNewOrderMessage, buildTrialRequestMessage, buildNextMessage, escapeMarkdown } from "@/lib/telegram-messages";
 import type { StoredOrder } from "@/lib/order-database";
 import { getMainPlanPrice, getPromotionPriceForPlan, resolvePlanPricing } from "@/lib/pricing";
@@ -50,7 +67,7 @@ function normalizePhone(phone: string) {
   return cleaned.startsWith("00") ? `+${cleaned.slice(2)}` : cleaned;
 }
 
-function buildWhatsAppUrl(order: Record<string, unknown>) {
+function buildWhatsAppUrl(order: StoredOrder) {
   const phone = normalizePhone(String(order.customerPhone || ""));
   const text = [
     "MI CORTEX X INC. — NEW ORDER",
@@ -64,12 +81,36 @@ function buildWhatsAppUrl(order: Record<string, unknown>) {
     `Payment Method: ${order.paymentMethod}`,
     `Payment Reference: ${order.paymentDetails}`,
     "",
-    `Payment Receipt: ${order.receiptFilename || order.receiptName || "N/A"}`,
+    `Payment Receipt: ${order.receiptFilename || "N/A"}`,
   ].join("\n");
 
   const encodedText = encodeURIComponent(text);
   const whatsappNumber = "94756390621";
   return `https://wa.me/${whatsappNumber}?text=${encodedText}`;
+}
+
+function buildSuccessResponse(order: StoredOrder, isTrial: boolean) {
+  const response: Record<string, unknown> = {
+    ok: true,
+    orderId: order.orderId,
+    orderNumber: order.orderId,
+    requestId: order.requestId,
+    referenceNumber: order.paymentDetails || "",
+    isTrial,
+    message: isTrial ? "Free trial request submitted successfully." : "Order submitted successfully.",
+  };
+
+  if (!isTrial) {
+    response.receiptFilename = order.receiptFilename;
+    response.receiptPath = order.receiptPath;
+    response.storageKey = order.storageKey;
+    response.whatsappUrl = buildWhatsAppUrl(order);
+  } else {
+    response.trialEndDate = order.trialEndDate;
+    response.trialEndTime = order.trialEndTime;
+  }
+
+  return NextResponse.json(response);
 }
 
 export async function POST(request: NextRequest) {
@@ -111,6 +152,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const idempotencyKey = request.headers.get("Idempotency-Key") || "";
+    if (!/^[0-9a-f-]{36}$/i.test(idempotencyKey)) {
+      return NextResponse.json({ ok: false, error: "Please retry the order submission." }, { status: 400 });
+    }
+
     const customerName = String(body.customerName || "").trim();
     const customerEmail = String(body.customerEmail || "").trim();
     const canvaEmail = String(body.canvaEmail || "").trim().toLowerCase();
@@ -138,9 +184,42 @@ export async function POST(request: NextRequest) {
     const additionalInfo = String(body.additionalInfo || "").trim();
     const originalReceiptName = String(body.receiptName || "").trim();
     const receiptFile = formData.get("receipt");
+    let fileBuffer: Buffer | null = null;
+    if (!isTrial && receiptFile && typeof receiptFile !== "string") {
+      fileBuffer = Buffer.from(await receiptFile.arrayBuffer());
+    }
+
+    const idempotencyFields = Array.from(formData.entries())
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string");
+    const payloadHash = hashOrderSubmission(idempotencyFields, fileBuffer || undefined);
+    const existingSubmission = await getOrderByIdempotencyKey(idempotencyKey);
+    if (existingSubmission) {
+      if (existingSubmission.payloadHash !== payloadHash) {
+        return NextResponse.json(
+          { ok: false, error: "This submission has changed. Please submit it again." },
+          { status: 409 },
+        );
+      }
+      const action = getIdempotencyAction(existingSubmission.telegramDeliveryStatus);
+      if (action === "already-delivered") {
+        if (isTrial || existingSubmission.receiptDeliveryStatus === "SENT") {
+          return buildSuccessResponse(existingSubmission.order, isTrial);
+        }
+      } else if (action === "in-progress") {
+        return NextResponse.json(
+          { ok: false, error: "Your order is still being processed. Please retry shortly." },
+          { status: 409 },
+        );
+      } else if (action === "manual-reconciliation") {
+        return NextResponse.json(
+          { ok: false, error: "We could not confirm delivery. Please contact support before retrying." },
+          { status: 409 },
+        );
+      }
+    }
 
     // Check for free trial duplicates (server-side, before any other processing)
-    if (isTrial) {
+    if (isTrial && !existingSubmission) {
       const trialExists = await hasFreeTrial(canvaEmail);
       if (trialExists) {
         return NextResponse.json(
@@ -163,8 +242,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invalid free trial details." }, { status: 400 });
     }
 
-    const orderId = await generateOrderNumber();
-      const requestId = isTrial ? await generateFreeTrialRequestId() : undefined;
+    const orderId = existingSubmission?.order.orderId || await generateOrderNumber();
+    const requestId = existingSubmission?.order.requestId || (isTrial ? await generateFreeTrialRequestId() : undefined);
     const requestPlanType = isTrial ? planNameToPlanType("FREE_TRIAL") : planNameToPlanType(selectedPlan);
     const paidRequestExpiry = requestPlanType ? calculateExpiry(requestPlanType, orderDateValue) : null;
     const trialRequestExpiry = isTrial ? new Date(orderDateValue) : null;
@@ -181,7 +260,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Unable to calculate order expiry." }, { status: 500 });
     }
 
-    let fileBuffer: Buffer | null = null;
     let finalReceiptName = "";
     let receiptPath = "";
 
@@ -191,30 +269,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: false, error: "Payment slip is required." }, { status: 400 });
       }
 
-      fileBuffer = receiptFile && typeof receiptFile !== "string" ? Buffer.from(await receiptFile.arrayBuffer()) : null;
-
-      const sanitizedReceiptName = originalReceiptName ? originalReceiptName.replace(/[^a-zA-Z0-9_.-]/g, "_") : "receipt";
-      finalReceiptName = `${orderId}${path.extname(sanitizedReceiptName || "receipt") || ".jpg"}`;
-
       if (fileBuffer) {
         const fileType = receiptFile.type || "image/jpeg";
         const allowedMime = ["image/jpeg", "image/png", "application/pdf"];
         if (!allowedMime.includes(fileType)) {
           return NextResponse.json({ ok: false, error: "Unsupported receipt file type." }, { status: 400 });
         }
-
-        const storageResult = await saveReceiptFile({
-          name: sanitizedReceiptName,
-          type: resolveReceiptMime(sanitizedReceiptName, fileType),
-          buffer: fileBuffer,
-        }, orderId);
-
-        if (!storageResult.saved) {
-          return NextResponse.json({ ok: false, error: storageResult.reason || "Unable to store receipt upload." }, { status: 400 });
-        }
-
-        finalReceiptName = storageResult.filename;
-        receiptPath = storageResult.path;
+        const sanitizedReceiptName = originalReceiptName ? originalReceiptName.replace(/[^a-zA-Z0-9_.-]/g, "_") : "receipt";
+        const extension = path.extname(sanitizedReceiptName).toLowerCase()
+          || (fileType === "application/pdf" ? ".pdf" : fileType === "image/png" ? ".png" : ".jpg");
+        finalReceiptName = `${orderId}${extension}`;
+        receiptPath = `/api/admin/orders/${encodeURIComponent(orderId)}/receipt`;
       }
     }
 
@@ -229,7 +294,7 @@ export async function POST(request: NextRequest) {
       discountSource === "stacked" ? "PROMOTION + PROMO_CODE" :
       "NONE";
 
-    const storedOrder: StoredOrder = {
+    let storedOrder: StoredOrder = {
       orderId,
           requestId,
       customerName,
@@ -288,44 +353,75 @@ export async function POST(request: NextRequest) {
       storedOrder.finalPrice = verifiedPlanPrice;
       storedOrder.planPrice = String(verifiedPlanPrice);    }
 
-    // For backward compatibility with frontend
-    const order: Record<string, any> = {
-      orderId,
-      customerName,
-      customerEmail,
-      canvaEmail,
-      paymentMethod,
-      orderDate: serverDateTime.date,
-      orderTime: serverDateTime.time,
-      orderCreatedAt: orderDateValue.toISOString(),
-      expiryDate: requestExpiryDateTime.date,
-      expiryTime: requestExpiryDateTime.time,
-    };
-
-    if (!isTrial) {
-      order.customerPhone = customerPhone;
-      order.selectedPlan = selectedPlan;
-      order.planPrice = String(verifiedPlanPrice);
-      order.paymentDetails = paymentDetails;
-      order.additionalInfo = additionalInfo;
-      order.receiptName = finalReceiptName;
-      order.receiptFilename = finalReceiptName;
-      order.storageKey = finalReceiptName;
-      order.receiptPath = receiptPath;
+    let persistedSubmission;
+    try {
+      persistedSubmission = await createOrderIdempotently(storedOrder, idempotencyKey, payloadHash);
+    } catch (error) {
+      if (error instanceof IdempotencyConflictError) {
+        return NextResponse.json(
+          { ok: false, error: "This submission has changed. Please submit it again." },
+          { status: 409 },
+        );
+      }
+      if (isTrial && await hasFreeTrial(canvaEmail)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "This Canva email address has already been used for a free trial. Each Canva email account can receive the 3-day free trial only once.",
+            isDuplicate: true,
+          },
+          { status: 400 },
+        );
+      }
+      throw error;
     }
 
-    if (isTrial) {
-      order.trialEndAt = requestExpiryDateTime.at;
-      order.trialEndDate = requestExpiryDateTime.date;
-      order.trialEndTime = requestExpiryDateTime.time;
+    if (!persistedSubmission.created) {
+      const action = getIdempotencyAction(persistedSubmission.persisted.telegramDeliveryStatus);
+      if (action === "in-progress") {
+        return NextResponse.json(
+          { ok: false, error: "Your order is still being processed. Please retry shortly." },
+          { status: 409 },
+        );
+      }
+      if (action === "manual-reconciliation") {
+        return NextResponse.json(
+          { ok: false, error: "We could not confirm delivery. Please contact support before retrying." },
+          { status: 409 },
+        );
+      }
+      storedOrder = persistedSubmission.persisted.order;
+    }
+
+    const order: StoredOrder = storedOrder;
+    if (!isTrial && fileBuffer) {
+      const receiptMime = resolveReceiptMime(finalReceiptName, receiptFile && typeof receiptFile !== "string" ? receiptFile.type || "image/jpeg" : "image/jpeg");
+      const receiptResult = await saveReceiptFile({
+        name: originalReceiptName || finalReceiptName,
+        type: receiptMime,
+        buffer: fileBuffer,
+      }, order.orderId);
+      if (!receiptResult.saved) {
+        return NextResponse.json({ ok: false, error: receiptResult.reason || "Unable to store payment receipt." }, { status: 500 });
+      }
+      order.receiptFilename = receiptResult.filename;
+      order.receiptPath = receiptResult.path;
+      order.storageKey = receiptResult.storageKey;
+      receiptPath = receiptResult.path;
     }
 
     const telegramBotToken = isTrial ? FREE_TRIAL_BOT_TOKEN : TELEGRAM_BOT_TOKEN;
     const telegramChatId = isTrial ? FREE_TRIAL_CHAT_ID : TELEGRAM_CHAT_ID;
-    if (!telegramBotToken || !telegramChatId) {
+    const missingTelegramConfiguration = getMissingTelegramConfiguration(
+      isTrial,
+      Boolean(telegramBotToken),
+      Boolean(telegramChatId),
+    );
+    if (missingTelegramConfiguration.length > 0) {
+      console.error("Telegram order delivery configuration missing:", missingTelegramConfiguration);
       return NextResponse.json(
         { ok: false, error: isTrial ? "Unable to send your Free Trial request right now. Please try again." : "Unable to send the order to Telegram right now. Please try again." },
-        { status: 500 }
+        { status: 503 }
       );
     }
 
@@ -341,143 +437,197 @@ export async function POST(request: NextRequest) {
         telegramMessageText = buildNewOrderMessage(storedOrder);
       }
     } catch (error) {
-      console.error("ORDER MESSAGE FORMAT ERROR:", error instanceof Error ? error.message : String(error));
+      console.error("ORDER MESSAGE FORMAT ERROR:", error instanceof Error ? error.name : "UnknownError");
       return NextResponse.json(
         { ok: false, error: "Unable to format order message. Please try again." },
         { status: 500 }
       );
     }
 
-    const telegramResponse = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: telegramChatId,
-        text: escapeMarkdown(telegramMessageText),
-        parse_mode: "MarkdownV2",
-        disable_web_page_preview: true,
-      }),
-    });
+    const errorMessage = isTrial
+      ? "Unable to send your Free Trial request right now. Please try again."
+      : "Unable to send the order to Telegram right now. Please try again.";
 
-    const telegramPayload = await telegramResponse.json().catch(() => ({}));
+    if (persistedSubmission.persisted.telegramDeliveryStatus !== "SENT") {
+      const claimed = await claimDelivery(order.orderId, "telegram");
+      if (!claimed) {
+        const current = await getOrderSnapshot(order.orderId);
+        if (current?.telegramDeliveryStatus !== "SENT") {
+          return NextResponse.json(
+            { ok: false, error: "Your order is already being processed. Please retry shortly." },
+            { status: 409 },
+          );
+        }
+      } else {
+        let telegramResponse: Response;
+        try {
+          telegramResponse = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: telegramChatId,
+              text: escapeMarkdown(telegramMessageText),
+              parse_mode: "MarkdownV2",
+              disable_web_page_preview: true,
+            }),
+          });
+        } catch {
+          await setDeliveryStatus(order.orderId, "telegram", "UNKNOWN");
+          return NextResponse.json(
+            { ok: false, error: "Delivery could not be confirmed. Please contact support before retrying." },
+            { status: 502 },
+          );
+        }
 
-    if (!telegramResponse.ok || !telegramPayload.ok) {
-      return NextResponse.json(
-        { ok: false, error: isTrial ? "Unable to send your Free Trial request right now. Please try again." : "Unable to send the order to Telegram right now. Please try again." },
-        { status: 502 }
-      );
+        const telegramPayload = await telegramResponse.json().catch(() => null);
+        const telegramOutcome = classifyTelegramResponse(telegramResponse.ok, telegramPayload);
+        if (telegramOutcome !== "SENT") {
+          console.error("Telegram rejected order delivery:", {
+            httpStatus: telegramResponse.status,
+            telegramErrorCode: getTelegramErrorCode(telegramPayload),
+            outcome: telegramOutcome,
+          });
+          await setDeliveryStatus(order.orderId, "telegram", telegramOutcome);
+          return NextResponse.json(
+            {
+              ok: false,
+              error: telegramOutcome === "UNKNOWN"
+                ? "Delivery could not be confirmed. Please contact support before retrying."
+                : errorMessage,
+            },
+            { status: 502 },
+          );
+        }
+        await setDeliveryStatus(order.orderId, "telegram", telegramOutcome);
+      }
     }
 
-    // Persist the exact order used to build the notification.
-    await saveOrder(storedOrder);
-
     // For trials: Send NEXT message immediately after successful main message
-    if (isTrial) {
+    if (isTrial && persistedSubmission.persisted.nextDeliveryStatus !== "SENT") {
       try {
-        const nextMessageSentAt = new Date();
-        const nextMessage = buildNextMessage();
-        const nextResponse = await fetch(`https://api.telegram.org/bot${FREE_TRIAL_BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: FREE_TRIAL_CHAT_ID,
-            text: escapeMarkdown(nextMessage),
-            parse_mode: "MarkdownV2",
-            disable_web_page_preview: true,
-          }),
-        });
-        const nextPayload = await nextResponse.json().catch(() => ({}));
-        if (nextResponse.ok && nextPayload.ok) {
-          await markTrialNextMessageSent(orderId, nextMessageSentAt.toISOString());
-        } else {
-          console.error("Failed to send trial NEXT message:", nextPayload);
+        const claimed = await claimDelivery(order.orderId, "next");
+        if (claimed) {
+          const nextMessageSentAt = new Date();
+          const nextResponse = await fetch(`https://api.telegram.org/bot${FREE_TRIAL_BOT_TOKEN}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: FREE_TRIAL_CHAT_ID,
+              text: escapeMarkdown(buildNextMessage()),
+              parse_mode: "MarkdownV2",
+              disable_web_page_preview: true,
+            }),
+          });
+          const nextPayload = await nextResponse.json().catch(() => null);
+          const nextOutcome = classifyTelegramResponse(nextResponse.ok, nextPayload);
+          if (nextOutcome === "SENT") {
+            await setDeliveryStatus(order.orderId, "next", "SENT");
+            await markTrialNextMessageSent(order.orderId, nextMessageSentAt.toISOString());
+          } else {
+            await setDeliveryStatus(order.orderId, "next", nextOutcome);
+            console.error("Failed to send trial NEXT message.");
+          }
         }
       } catch (error) {
-        console.error("Error sending trial NEXT message:", error);
+        await setDeliveryStatus(order.orderId, "next", "UNKNOWN");
+        console.error("Error sending trial NEXT message:", error instanceof Error ? error.name : "UnknownError");
       }
     }
 
     // Only send receipt document for paid orders, not for trials
-    let imageDeliverySuccessful = true;
-    if (!isTrial && receiptFile && typeof receiptFile !== "string" && finalReceiptName) {
-      const receiptMime = resolveReceiptMime(finalReceiptName, receiptFile.type || "image/jpeg");
-      if (receiptMime === "application/pdf" || receiptMime.startsWith("image/")) {
-        const photoPayload = new FormData();
-        const receiptUrl = receiptPath;
-        const fileContent = await fs.readFile(receiptUrl);
-        const photoBlob = new Blob([fileContent], { type: receiptMime });
-        photoPayload.append("chat_id", String(TELEGRAM_CHAT_ID));
-        photoPayload.append("caption", `Order Number: ${orderId}`);
-        photoPayload.append("document", photoBlob, finalReceiptName);
-        const documentResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
-          method: "POST",
-          body: photoPayload,
-        });
-        const documentPayload = await documentResponse.json().catch(() => ({}));
-        if (!documentResponse.ok || !documentPayload.ok) {
-          console.error("Failed to send payment slip to Telegram:", documentPayload);
-          imageDeliverySuccessful = false;
+    if (!isTrial && finalReceiptName && fileBuffer) {
+      if (persistedSubmission.persisted.receiptDeliveryStatus !== "SENT") {
+        const claimed = await claimDelivery(order.orderId, "receipt");
+        if (!claimed) {
+          const current = await getOrderSnapshot(order.orderId);
+          if (current?.receiptDeliveryStatus !== "SENT") {
+            return NextResponse.json(
+              { ok: false, error: "Payment receipt delivery is being processed. Please retry shortly." },
+              { status: 409 },
+            );
+          }
+        } else {
+          const receiptMime = resolveReceiptMime(finalReceiptName, receiptFile && typeof receiptFile !== "string" ? receiptFile.type || "image/jpeg" : "image/jpeg");
+          const photoPayload = new FormData();
+          const photoBlob = new Blob([Uint8Array.from(fileBuffer)], { type: receiptMime });
+          photoPayload.append("chat_id", String(TELEGRAM_CHAT_ID));
+          photoPayload.append("caption", `Order Number: ${order.orderId}`);
+          photoPayload.append("document", photoBlob, finalReceiptName);
+          let documentResponse: Response;
+          try {
+            documentResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
+              method: "POST",
+              body: photoPayload,
+            });
+          } catch {
+            await setDeliveryStatus(order.orderId, "receipt", "UNKNOWN");
+            return NextResponse.json(
+              { ok: false, error: "Receipt delivery could not be confirmed. Please contact support before retrying." },
+              { status: 502 },
+            );
+          }
+          const documentPayload = await documentResponse.json().catch(() => null);
+          const receiptOutcome = classifyTelegramResponse(documentResponse.ok, documentPayload);
+          if (receiptOutcome !== "SENT") {
+            await setDeliveryStatus(order.orderId, "receipt", receiptOutcome);
+            return NextResponse.json(
+              {
+                ok: false,
+                error: receiptOutcome === "UNKNOWN"
+                  ? "Receipt delivery could not be confirmed. Please contact support before retrying."
+                  : "Unable to send the payment receipt to Telegram. Please try again.",
+              },
+              { status: 502 },
+            );
+          }
+          await setDeliveryStatus(order.orderId, "receipt", receiptOutcome);
         }
       }
     }
 
     // For paid orders: Send NEXT message after successful image delivery (or after main message if no image)
-    if (!isTrial && imageDeliverySuccessful) {
+    if (!isTrial && persistedSubmission.persisted.nextDeliveryStatus !== "SENT") {
       try {
-        const nextMessageSentAt = new Date();
-        const nextMessage = buildNextMessage();
-        const nextResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: TELEGRAM_CHAT_ID,
-            text: escapeMarkdown(nextMessage),
-            parse_mode: "MarkdownV2",
-            disable_web_page_preview: true,
-          }),
-        });
-        const nextPayload = await nextResponse.json().catch(() => ({}));
-        if (nextResponse.ok && nextPayload.ok) {
-          await markOrderNextMessageSent(orderId, nextMessageSentAt.toISOString());
-        } else {
-          console.error("Failed to send order NEXT message:", nextPayload);
+        const claimed = await claimDelivery(order.orderId, "next");
+        if (claimed) {
+          const nextMessageSentAt = new Date();
+          const nextResponse = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: TELEGRAM_CHAT_ID,
+              text: escapeMarkdown(buildNextMessage()),
+              parse_mode: "MarkdownV2",
+              disable_web_page_preview: true,
+            }),
+          });
+          const nextPayload = await nextResponse.json().catch(() => null);
+          const nextOutcome = classifyTelegramResponse(nextResponse.ok, nextPayload);
+          if (nextOutcome === "SENT") {
+            await setDeliveryStatus(order.orderId, "next", "SENT");
+            await markOrderNextMessageSent(order.orderId, nextMessageSentAt.toISOString());
+          } else {
+            await setDeliveryStatus(order.orderId, "next", nextOutcome);
+            console.error("Failed to send order NEXT message.");
+          }
         }
       } catch (error) {
-        console.error("Error sending order NEXT message:", error);
+        await setDeliveryStatus(order.orderId, "next", "UNKNOWN");
+        console.error("Error sending order NEXT message:", error instanceof Error ? error.name : "UnknownError");
       }
     }
 
-    const whatsappUrl = !isTrial ? buildWhatsAppUrl(order) : "";
-
-    const response: Record<string, any> = {
-      ok: true,
-      orderId: order.orderId,
-      orderNumber: order.orderId,
-      requestId: order.requestId,
-      referenceNumber: order.paymentDetails || paymentDetails || "",
-      isTrial: isTrial,
-      message: isTrial ? "Free trial request submitted successfully." : "Order submitted successfully.",
-    };
-
-    if (!isTrial) {
-      response.receiptFilename = order.receiptFilename;
-      response.receiptPath = order.receiptPath;
-      response.storageKey = order.storageKey;
-      response.whatsappUrl = whatsappUrl;
-    }
-
-    if (isTrial) {
-      response.trialEndDate = order.trialEndDate;
-      response.trialEndTime = order.trialEndTime;
-    }
-
-    return NextResponse.json(response);
+    return buildSuccessResponse(order, isTrial);
   } catch (error) {
-    console.error("Order API error:", error);
+    const diagnostic = getSafeOrderSubmissionDiagnostic(error);
+    console.error("Order API error:", diagnostic);
+    const errorMessage = diagnostic.category === "DATABASE_CONFIGURATION" || diagnostic.category === "DATABASE"
+      ? "Order storage is temporarily unavailable. Please try again."
+      : diagnostic.category === "FILESYSTEM"
+        ? "Unable to store the payment receipt. Please try again."
+        : "Unable to process your order right now. Please try again.";
     return NextResponse.json(
-      { ok: false, error: "Unable to send the order to Telegram right now. Please try again." },
+      { ok: false, error: errorMessage },
       { status: 500 }
     );
   }
