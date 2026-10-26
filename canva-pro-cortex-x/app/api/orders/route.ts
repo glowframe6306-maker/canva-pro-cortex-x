@@ -5,9 +5,9 @@ import {
   getIdempotencyAction,
   getMissingTelegramConfiguration,
   getSafeOrderSubmissionDiagnostic,
-  getTelegramErrorCode,
   hashOrderSubmission,
   isOrderSubmissionDelivered,
+  sendTelegramMessage,
 } from "@/lib/order-submission";
 import path from "node:path";
 import { generateFreeTrialRequestId, generateOrderNumber, resolveReceiptMime, saveReceiptFile } from "@/lib/order-system";
@@ -360,7 +360,7 @@ export async function POST(request: NextRequest) {
       Boolean(telegramBotToken),
       Boolean(telegramChatId),
     );
-    if (missingTelegramConfiguration.length > 0) {
+    if (missingTelegramConfiguration.length > 0 || !telegramBotToken || !telegramChatId) {
       console.error("Telegram order delivery configuration missing:", missingTelegramConfiguration);
       return NextResponse.json(
         { ok: false, error: isTrial ? "Unable to send your Free Trial request right now. Please try again." : "Unable to send the order to Telegram right now. Please try again." },
@@ -402,34 +402,21 @@ export async function POST(request: NextRequest) {
           );
         }
       } else {
-        let telegramResponse: Response;
-        try {
-          telegramResponse = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: telegramChatId,
-              text: escapeMarkdown(telegramMessageText),
-              parse_mode: "MarkdownV2",
-              disable_web_page_preview: true,
-            }),
-          });
-        } catch {
-          await setDeliveryStatus(order.orderId, "telegram", "UNKNOWN");
-          return NextResponse.json(
-            { ok: false, error: "Delivery could not be confirmed. Please contact support before retrying." },
-            { status: 502 },
-          );
-        }
-
-        const telegramPayload = await telegramResponse.json().catch(() => null);
-        const telegramOutcome = classifyTelegramResponse(telegramResponse.ok, telegramPayload);
+        const telegramDelivery = await sendTelegramMessage(
+          fetch,
+          telegramBotToken,
+          telegramChatId,
+          escapeMarkdown(telegramMessageText),
+        );
+        const telegramOutcome = telegramDelivery.outcome;
         if (telegramOutcome !== "SENT") {
-          console.error("Telegram rejected order delivery:", {
-            httpStatus: telegramResponse.status,
-            telegramErrorCode: getTelegramErrorCode(telegramPayload),
-            outcome: telegramOutcome,
-          });
+          if (telegramDelivery.httpStatus !== undefined) {
+            console.error("Telegram rejected order delivery:", {
+              httpStatus: telegramDelivery.httpStatus,
+              telegramErrorCode: telegramDelivery.errorCode,
+              outcome: telegramOutcome,
+            });
+          }
           await setDeliveryStatus(order.orderId, "telegram", telegramOutcome);
           return NextResponse.json(
             {

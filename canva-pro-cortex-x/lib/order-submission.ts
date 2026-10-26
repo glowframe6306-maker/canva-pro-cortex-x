@@ -52,6 +52,35 @@ export function classifyTelegramResponse(httpOk: boolean, payload: unknown): "SE
   return "UNKNOWN";
 }
 
+export async function sendTelegramMessage(
+  fetcher: typeof fetch,
+  botToken: string,
+  chatId: string,
+  text: string,
+): Promise<{ outcome: "SENT" | "FAILED" | "UNKNOWN"; httpStatus?: number; errorCode?: number }> {
+  try {
+    const response = await fetcher(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "MarkdownV2",
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json().catch(() => null);
+    return {
+      outcome: classifyTelegramResponse(response.ok, payload),
+      httpStatus: response.status,
+      errorCode: getTelegramErrorCode(payload),
+    };
+  } catch {
+    return { outcome: "UNKNOWN" };
+  }
+}
+
 export function getIdempotencyAction(status: DeliveryStatus): IdempotencyAction {
   if (status === "SENT") return "already-delivered";
   if (status === "PENDING" || status === "FAILED") return "deliver";

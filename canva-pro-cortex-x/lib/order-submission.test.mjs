@@ -13,6 +13,7 @@ import {
   getTelegramErrorCode,
   hashOrderSubmission,
   isOrderSubmissionDelivered,
+  sendTelegramMessage,
 } from "./order-submission.ts";
 
 const routePath = path.join(
@@ -102,6 +103,61 @@ test("ambiguous Telegram responses are never treated as retry-safe failures", ()
   assert.equal(classifyTelegramResponse(true, {}), "UNKNOWN");
 });
 
+test("Telegram request reports success only after an affirmative API response", async () => {
+  let request;
+  const result = await sendTelegramMessage(
+    async (url, options) => {
+      request = { url, options };
+      return Response.json({ ok: true }, { status: 200 });
+    },
+    "test-token",
+    "test-chat",
+    "Test order",
+  );
+
+  assert.deepEqual(result, { outcome: "SENT", httpStatus: 200, errorCode: undefined });
+  assert.equal(request.url, "https://api.telegram.org/bottest-token/sendMessage");
+  assert.deepEqual(JSON.parse(request.options.body), {
+    chat_id: "test-chat",
+    text: "Test order",
+    parse_mode: "MarkdownV2",
+    disable_web_page_preview: true,
+  });
+  assert.ok(request.options.signal instanceof AbortSignal);
+});
+
+test("Telegram API rejection reports a retryable failure without exposing its description", async () => {
+  const result = await sendTelegramMessage(
+    async () => Response.json({ ok: false, error_code: 400, description: "private detail" }, { status: 400 }),
+    "test-token",
+    "test-chat",
+    "Test order",
+  );
+
+  assert.deepEqual(result, { outcome: "FAILED", httpStatus: 400, errorCode: 400 });
+  assert.equal(JSON.stringify(result).includes("private detail"), false);
+});
+
+test("Telegram timeouts and malformed responses remain unconfirmed", async () => {
+  const timeout = await sendTelegramMessage(
+    async () => {
+      throw new DOMException("request timed out", "AbortError");
+    },
+    "test-token",
+    "test-chat",
+    "Test order",
+  );
+  const malformed = await sendTelegramMessage(
+    async () => new Response("not-json", { status: 200 }),
+    "test-token",
+    "test-chat",
+    "Test order",
+  );
+
+  assert.deepEqual(timeout, { outcome: "UNKNOWN" });
+  assert.deepEqual(malformed, { outcome: "UNKNOWN", httpStatus: 200, errorCode: undefined });
+});
+
 test("order failure diagnostics distinguish database configuration and ENOENT without exposing messages", () => {
   const databaseError = new Error("PostgreSQL is not configured. Set POSTGRES_URL or DATABASE_URL.");
   const filesystemError = Object.assign(new Error("private path must not be logged"), { code: "ENOENT" });
@@ -172,7 +228,7 @@ test("order persistence and idempotency lookup happen before Telegram configurat
 test("orders and receipts are persisted before Telegram delivery is attempted", () => {
   const orderPersisted = orderRoute.indexOf("createOrderIdempotently(storedOrder");
   const receiptPersisted = orderRoute.indexOf("await saveReceiptFile({");
-  const telegramAttempted = orderRoute.indexOf("telegramResponse = await fetch");
+  const telegramAttempted = orderRoute.indexOf("await sendTelegramMessage(");
   const telegramConfirmed = orderRoute.indexOf('setDeliveryStatus(order.orderId, "telegram", telegramOutcome)');
 
   assert.ok(orderPersisted >= 0);
