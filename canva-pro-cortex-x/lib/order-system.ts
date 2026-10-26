@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveApplicationTimezone } from "@/lib/expiry-calculator";
 import { getNextOrderCounter } from "@/lib/order-database";
 import { getPostgresClient } from "@/lib/postgres";
 
@@ -40,7 +41,7 @@ function getDateStamp() {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    timeZone: process.env.TZ || "Asia/Colombo",
+    timeZone: resolveApplicationTimezone(),
   }).format(new Date()).replace(/-/g, "");
 }
 

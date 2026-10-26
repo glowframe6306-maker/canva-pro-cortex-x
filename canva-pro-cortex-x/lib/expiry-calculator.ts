@@ -15,7 +15,20 @@ export type ExpiryCalculation = {
   durationDays: number;
 };
 
-const APP_TIMEZONE = process.env.TZ || "Asia/Colombo";
+const DEFAULT_APP_TIMEZONE = "Asia/Colombo";
+
+export function resolveApplicationTimezone(timezone = process.env.TZ): string {
+  const candidate = timezone?.trim() || DEFAULT_APP_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: candidate });
+    return candidate;
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    return DEFAULT_APP_TIMEZONE;
+  }
+}
+
+const APP_TIMEZONE = resolveApplicationTimezone();
 
 const PLAN_DURATIONS: Record<PlanType, number> = {
   FREE_TRIAL: 3,
@@ -33,7 +46,7 @@ export function formatDateInTimezone(date: Date, timezone = APP_TIMEZONE): strin
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    timeZone: timezone,
+    timeZone: resolveApplicationTimezone(timezone),
   }).format(date);
   return formatted;
 }
@@ -47,7 +60,7 @@ export function formatTimeInTimezone(date: Date, timezone = APP_TIMEZONE): strin
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    timeZone: timezone,
+    timeZone: resolveApplicationTimezone(timezone),
   }).format(date);
 }
 

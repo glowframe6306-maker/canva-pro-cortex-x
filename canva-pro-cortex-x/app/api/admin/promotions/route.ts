@@ -21,6 +21,7 @@ import {
   type Promotion,
 } from "@/lib/promotion-database";
 import { hasAdminSession } from "@/lib/admin-auth";
+import { MissingApplicationSettingError } from "@/lib/application-settings-values";
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,6 +53,12 @@ export async function GET(request: NextRequest) {
     const promotions = await getAllPromotions();
     return NextResponse.json({ ok: true, promotions });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     console.error("Promotions API GET error:", error);
     return NextResponse.json({ ok: false, error: "Unable to fetch promotions" }, { status: 500 });
   }
@@ -81,6 +88,12 @@ export async function POST(request: NextRequest) {
     const newPromo = await createPromotion(body);
     return NextResponse.json({ ok: true, promotion: newPromo }, { status: 201 });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to create/update promotion";
     console.error("Promotions API POST error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
@@ -110,6 +123,12 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json({ ok: true, promotion: updatedPromo });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to update promotion";
     console.error("Promotions API PUT error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
@@ -138,6 +157,12 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ ok: true, message: "Promotion deleted" });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to delete promotion";
     console.error("Promotions API DELETE error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

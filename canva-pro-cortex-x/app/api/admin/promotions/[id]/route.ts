@@ -6,6 +6,7 @@ import {
   updatePromotion,
 } from "@/lib/promotion-database";
 import { hasAdminSession } from "@/lib/admin-auth";
+import { MissingApplicationSettingError } from "@/lib/application-settings-values";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -25,6 +26,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({ ok: true, promotion });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to fetch promotion";
     console.error("Promotion detail GET error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
@@ -51,6 +58,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     return NextResponse.json({ ok: true, promotion: updatedPromo });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to update promotion";
     console.error("Promotion detail PUT error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
@@ -75,6 +88,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     return NextResponse.json({ ok: true, message: "Promotion deleted" });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to delete promotion";
     console.error("Promotion detail DELETE error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
@@ -99,6 +118,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     return NextResponse.json({ ok: true, promotion: updatedPromo });
   } catch (error) {
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { ok: false, error: "Promotions have not been migrated. Restore the existing promotions before editing." },
+        { status: 503 },
+      );
+    }
     const message = error instanceof Error ? error.message : "Unable to toggle promotion";
     console.error("Promotion toggle POST error:", error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

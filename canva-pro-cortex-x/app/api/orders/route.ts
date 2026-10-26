@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   classifyTelegramResponse,
+  getMissingOrderFields,
   getIdempotencyAction,
   getMissingTelegramConfiguration,
   getSafeOrderSubmissionDiagnostic,
   getTelegramErrorCode,
   hashOrderSubmission,
+  isOrderSubmissionDelivered,
 } from "@/lib/order-submission";
 import path from "node:path";
 import { generateFreeTrialRequestId, generateOrderNumber, resolveReceiptMime, saveReceiptFile } from "@/lib/order-system";
@@ -25,42 +27,12 @@ import { buildNewOrderMessage, buildTrialRequestMessage, buildNextMessage, escap
 import type { StoredOrder } from "@/lib/order-database";
 import { getMainPlanPrice, getPromotionPriceForPlan, resolvePlanPricing } from "@/lib/pricing";
 import { getActivePromotion } from "@/lib/promotion-database";
-import { getSiteSettings, validatePromoCodeForPlan } from "@/lib/site-settings";
+import { validatePromoCodeForPlan } from "@/lib/site-settings";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const FREE_TRIAL_BOT_TOKEN = process.env.FREE_TRIAL_BOT_TOKEN;
 const FREE_TRIAL_CHAT_ID = process.env.FREE_TRIAL_CHAT_ID;
-const APP_TIMEZONE = process.env.TZ || "Asia/Colombo";
-
-function formatLocalDate(date: Date) {
-  const formatted = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone: APP_TIMEZONE,
-  }).format(date);
-  return formatted;
-}
-
-function formatLocalTime(date: Date) {
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-    timeZone: APP_TIMEZONE,
-  }).format(date);
-}
-
-function getLocalDateTimeStrings(date = new Date()) {
-  return {
-    date: formatLocalDate(date),
-    time: formatLocalTime(date),
-  };
-}
-
-
 function normalizePhone(phone: string) {
   if (!phone) return "";
   const cleaned = phone.replace(/[^\d+]/g, "");
@@ -121,35 +93,12 @@ export async function POST(request: NextRequest) {
     const paymentMethod = String(body.paymentMethod || "").trim();
     const isTrial = paymentMethod === "Free Trial";
 
-    // Different validation for free trials vs paid orders
-    if (isTrial) {
-      const requiredTrial = ["customerName", "customerEmail", "customerPhone", "canvaEmail"];
-      const missingTrial = requiredTrial.filter((field) => !String(body?.[field] ?? "").trim());
-      if (missingTrial.length > 0) {
-        return NextResponse.json(
-          { ok: false, error: "Please fill in all required fields." },
-          { status: 400 }
-        );
-      }
-    } else {
-      // Paid order validation
-      const required = [
-        "customerName",
-        "customerPhone",
-        "customerEmail",
-        "selectedPlan",
-        "planPrice",
-        "paymentMethod",
-        "paymentDetails",
-        "orderDate",
-      ];
-      const missing = required.filter((field) => !String(body?.[field] ?? "").trim());
-      if (missing.length > 0) {
-        return NextResponse.json(
-          { ok: false, error: "Missing required order information." },
-          { status: 400 }
-        );
-      }
+    const missingFields = getMissingOrderFields(isTrial, body);
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        { ok: false, error: isTrial ? "Please fill in all required fields." : "Missing required order information." },
+        { status: 400 }
+      );
     }
 
     const idempotencyKey = request.headers.get("Idempotency-Key") || "";
@@ -173,13 +122,12 @@ export async function POST(request: NextRequest) {
     const promotionOffer = activePromotion ? getPromotionPriceForPlan(selectedPlanKey, activePromotion) : null;
     const promoValidation = enteredPromoCode ? await validatePromoCodeForPlan(enteredPromoCode, selectedPlanKey, mainPrice) : null;
     const discountSource = String(priceState.priceSource || "main");
-    const siteSettings = await getSiteSettings();
     const promotionDiscountAmount = promotionOffer && promotionOffer.hasActivePromotion ? Math.max(0, mainPrice - promotionOffer.promotionPrice) : 0;
     const promotionDiscountPercentage = promotionOffer && promotionOffer.hasActivePromotion && mainPrice > 0 ? Math.round((promotionDiscountAmount / mainPrice) * 100) : 0;
     const promoDiscountAmount = promoValidation?.valid ? Number(promoValidation.discount || 0) : 0;
     const promoDiscountPercentage = promoValidation?.valid && mainPrice > 0 ? Math.round((promoDiscountAmount / mainPrice) * 100) : 0;
     const orderDateValue = new Date();
-    const serverDateTime = getLocalDateTimeStrings(orderDateValue);
+    const serverDateTime = getDateTimeInTimezone(orderDateValue);
     const orderDate = String(body.orderDate || orderDateValue.toISOString()).trim();
     const additionalInfo = String(body.additionalInfo || "").trim();
     const originalReceiptName = String(body.receiptName || "").trim();
@@ -202,7 +150,11 @@ export async function POST(request: NextRequest) {
       }
       const action = getIdempotencyAction(existingSubmission.telegramDeliveryStatus);
       if (action === "already-delivered") {
-        if (isTrial || existingSubmission.receiptDeliveryStatus === "SENT") {
+        if (isOrderSubmissionDelivered(
+          isTrial,
+          existingSubmission.telegramDeliveryStatus,
+          existingSubmission.receiptDeliveryStatus,
+        )) {
           return buildSuccessResponse(existingSubmission.order, isTrial);
         }
       } else if (action === "in-progress") {
@@ -233,15 +185,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Validate required fields based on order type
-    if (!isTrial && (!customerName || !customerPhone || !customerEmail || !selectedPlan || !paymentMethod || !paymentDetails)) {
-      return NextResponse.json({ ok: false, error: "Invalid order details provided." }, { status: 400 });
-    }
-
-    if (isTrial && (!customerName || !customerEmail || !customerPhone || !canvaEmail)) {
-      return NextResponse.json({ ok: false, error: "Invalid free trial details." }, { status: 400 });
-    }
-
     const orderId = existingSubmission?.order.orderId || await generateOrderNumber();
     const requestId = existingSubmission?.order.requestId || (isTrial ? await generateFreeTrialRequestId() : undefined);
     const requestPlanType = isTrial ? planNameToPlanType("FREE_TRIAL") : planNameToPlanType(selectedPlan);
@@ -253,7 +196,7 @@ export async function POST(request: NextRequest) {
     const requestExpiryDateTime = paidRequestExpiry
       ? { date: paidRequestExpiry.expiryDate, time: paidRequestExpiry.expiryTime, at: paidRequestExpiry.expiryAt }
       : trialRequestExpiry
-        ? { ...getLocalDateTimeStrings(trialRequestExpiry), at: trialRequestExpiry.toISOString() }
+        ? { ...getDateTimeInTimezone(trialRequestExpiry), at: trialRequestExpiry.toISOString() }
         : null;
 
     if (!requestExpiryDateTime) {
@@ -625,6 +568,8 @@ export async function POST(request: NextRequest) {
       ? "Order storage is temporarily unavailable. Please try again."
       : diagnostic.category === "FILESYSTEM"
         ? "Unable to store the payment receipt. Please try again."
+        : diagnostic.category === "APPLICATION_CONFIGURATION"
+          ? "Order pricing settings are unavailable. Please contact support."
         : "Unable to process your order right now. Please try again.";
     return NextResponse.json(
       { ok: false, error: errorMessage },

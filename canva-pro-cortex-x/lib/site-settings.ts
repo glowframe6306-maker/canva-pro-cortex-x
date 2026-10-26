@@ -1,5 +1,8 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import {
+  getApplicationSetting,
+  saveApplicationSetting,
+} from "@/lib/application-settings-store";
+import { InvalidApplicationSettingError } from "@/lib/application-settings-values";
 
 export type FeaturedPlanSettings = {
   featuredPlanId: string;
@@ -61,9 +64,6 @@ export type SiteSettings = FeaturedPlanSettings & {
   announcement: AnnouncementSettings;
   discountStacking: boolean;
 };
-
-const DATA_DIR = path.join(process.cwd(), ".data");
-const SETTINGS_FILE = path.join(DATA_DIR, "site-settings.json");
 
 const defaultFAQ: FAQItem[] = [
   {
@@ -139,35 +139,39 @@ export const defaultSiteSettings: SiteSettings = {
   discountStacking: false,
 };
 
-async function ensureSettingsFile() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    await fs.access(SETTINGS_FILE);
-  } catch {
-    await fs.writeFile(SETTINGS_FILE, JSON.stringify(defaultSiteSettings, null, 2), "utf8");
-  }
+function isStoredSiteSettings(value: unknown): value is SiteSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const settings = value as Partial<SiteSettings>;
+  const announcement = settings.announcement;
+  return typeof settings.featuredPlanId === "string"
+    && typeof settings.featuredPlanEnabled === "boolean"
+    && typeof settings.featuredBadgeText === "string"
+    && Array.isArray(settings.faqs)
+    && Array.isArray(settings.promoCodes)
+    && Boolean(announcement)
+    && typeof announcement?.enabled === "boolean"
+    && typeof announcement.message === "string"
+    && typeof announcement.buttonText === "string"
+    && typeof announcement.buttonAction === "string"
+    && typeof settings.discountStacking === "boolean";
 }
 
 export async function getSiteSettings(): Promise<SiteSettings> {
-  try {
-    await ensureSettingsFile();
-    const raw = await fs.readFile(SETTINGS_FILE, "utf8");
-    const parsed = JSON.parse(raw || "{}");
-    return {
-      ...defaultSiteSettings,
-      ...parsed,
-      announcement: { ...defaultSiteSettings.announcement, ...(parsed.announcement || {}) },
-      faqs: Array.isArray(parsed.faqs) && parsed.faqs.length ? parsed.faqs : defaultSiteSettings.faqs,
-      promoCodes: Array.isArray(parsed.promoCodes) ? parsed.promoCodes : [],
-      featuredPlanId: String(parsed.featuredPlanId || defaultSiteSettings.featuredPlanId),
-      featuredPlanEnabled: parsed.featuredPlanEnabled !== false,
-      featuredBadgeText: String(parsed.featuredBadgeText || defaultSiteSettings.featuredBadgeText),
-      discountStacking: parsed.discountStacking === true,
-    };
-  } catch (error) {
-    console.error("Failed to read site settings:", error);
-    return defaultSiteSettings;
+  const parsed = await getApplicationSetting<unknown>("site-settings");
+  if (!isStoredSiteSettings(parsed)) {
+    throw new InvalidApplicationSettingError("site-settings");
   }
+  return {
+    ...defaultSiteSettings,
+    ...parsed,
+    announcement: { ...defaultSiteSettings.announcement, ...(parsed.announcement || {}) },
+    faqs: Array.isArray(parsed.faqs) && parsed.faqs.length ? parsed.faqs : defaultSiteSettings.faqs,
+    promoCodes: Array.isArray(parsed.promoCodes) ? parsed.promoCodes : [],
+    featuredPlanId: String(parsed.featuredPlanId || defaultSiteSettings.featuredPlanId),
+    featuredPlanEnabled: parsed.featuredPlanEnabled !== false,
+    featuredBadgeText: String(parsed.featuredBadgeText || defaultSiteSettings.featuredBadgeText),
+    discountStacking: parsed.discountStacking === true,
+  };
 }
 
 export async function saveSiteSettings(settings: Partial<SiteSettings>): Promise<SiteSettings> {
@@ -197,8 +201,7 @@ export async function saveSiteSettings(settings: Partial<SiteSettings>): Promise
     promo.updatedAt = new Date().toISOString();
   }
 
-  await ensureSettingsFile();
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf8");
+  await saveApplicationSetting("site-settings", merged);
   return merged;
 }
 

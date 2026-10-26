@@ -3,9 +3,12 @@
  * Stores and manages limited-time offers
  */
 
-import fs from "node:fs/promises";
-import path from "node:path";
 import { plans as basePlans } from "@/components/site-data";
+import {
+  getApplicationSetting,
+  saveApplicationSetting,
+} from "@/lib/application-settings-store";
+import { InvalidApplicationSettingError } from "@/lib/application-settings-values";
 
 export type PromotionPlanKey = "weekly" | "monthly" | "annually" | "lifetime";
 
@@ -37,9 +40,6 @@ export interface Promotion {
   createdAt: string;
   updatedAt: string;
 }
-
-const DATA_DIR = path.join(process.cwd(), ".data");
-const PROMOTIONS_FILE = path.join(DATA_DIR, "promotions.json");
 
 const planOrder: PromotionPlanKey[] = ["weekly", "monthly", "annually", "lifetime"];
 
@@ -214,6 +214,29 @@ function validatePromotionInput(data: Partial<Promotion>, mode: "create" | "upda
   };
 }
 
+function isStoredPromotion(value: unknown): value is Promotion {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const promotion = value as Partial<Promotion>;
+  if (
+    typeof promotion.id !== "string"
+    || typeof promotion.enabled !== "boolean"
+    || typeof promotion.name !== "string"
+    || typeof promotion.title !== "string"
+    || !Array.isArray(promotion.applicablePlans)
+    || !promotion.applicablePlans.every((plan) => typeof plan === "string")
+    || !promotion.planPrices
+    || typeof promotion.planPrices !== "object"
+  ) {
+    return false;
+  }
+  return planOrder.every((planKey) => {
+    const price = promotion.planPrices?.[planKey];
+    return Boolean(price)
+      && Number.isFinite(price?.promotionalPrice)
+      && typeof price?.enabled === "boolean";
+  });
+}
+
 export function getPromotionOfferForPlan(promotion: Promotion | null | undefined, planId: string): {
   active: boolean;
   normalPrice: number;
@@ -272,34 +295,22 @@ export function isPromotionActive(promotion: Promotion | null | undefined, now =
   return true;
 }
 
-async function ensureDataDir() {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-  } catch {
-    // Directory already exists
-  }
-}
-
 async function readPromotions(): Promise<Promotion[]> {
-  try {
-    await ensureDataDir();
-    const data = await fs.readFile(PROMOTIONS_FILE, "utf-8");
-    const parsed = JSON.parse(data || "[]");
-    return Array.isArray(parsed) ? parsed.map((promo) => ({
-      ...promo,
-      title: promo.title || promo.name || "Limited-Time Offer",
-      name: promo.name || promo.title || "Limited-Time Offer",
-      planPrices: normalizePlanPrices(promo.planPrices),
-      applicablePlans: normalizePromotionPlanList(promo.applicablePlans || []),
-    })) : [];
-  } catch {
-    return [];
+  const parsed = await getApplicationSetting<unknown>("promotions");
+  if (!Array.isArray(parsed) || !parsed.every(isStoredPromotion)) {
+    throw new InvalidApplicationSettingError("promotions");
   }
+  return parsed.map((promo) => ({
+    ...promo,
+    title: promo.title || promo.name || "Limited-Time Offer",
+    name: promo.name || promo.title || "Limited-Time Offer",
+    planPrices: normalizePlanPrices(promo.planPrices),
+    applicablePlans: normalizePromotionPlanList(promo.applicablePlans || []),
+  }));
 }
 
 async function writePromotions(promotions: Promotion[]): Promise<void> {
-  await ensureDataDir();
-  await fs.writeFile(PROMOTIONS_FILE, JSON.stringify(promotions, null, 2));
+  await saveApplicationSetting("promotions", promotions);
 }
 
 export async function getActivePromotion(): Promise<Promotion | null> {

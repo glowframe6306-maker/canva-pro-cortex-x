@@ -17,6 +17,7 @@ test("migration preflight runs inside the transaction before DDL", () => {
   const commit = migration.lastIndexOf("COMMIT;");
 
   assert.ok(begin >= 0 && preflight > begin && firstDdl > preflight && commit > firstDdl);
+  assert.match(migration, /COMMIT;\s*$/);
 });
 
 test("preflight checks table kind, exact column sets, types, nullability, and constraints", () => {

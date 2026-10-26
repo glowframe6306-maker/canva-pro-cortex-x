@@ -6,11 +6,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   classifyTelegramResponse,
+  getMissingOrderFields,
   getIdempotencyAction,
   getMissingTelegramConfiguration,
   getSafeOrderSubmissionDiagnostic,
   getTelegramErrorCode,
   hashOrderSubmission,
+  isOrderSubmissionDelivered,
 } from "./order-submission.ts";
 
 const routePath = path.join(
@@ -44,12 +46,53 @@ test("order submission hash includes receipt bytes and field values", () => {
   assert.notEqual(hashOrderSubmission(fields), hashOrderSubmission([["customerEmail", "other@example.test"]]));
 });
 
+test("order validation rejects missing paid and trial fields before persistence", () => {
+  assert.deepEqual(
+    getMissingOrderFields(false, { customerName: "Buyer", customerEmail: "buyer@example.test" }),
+    ["customerPhone", "selectedPlan", "planPrice", "paymentMethod", "paymentDetails", "orderDate"],
+  );
+  assert.deepEqual(
+    getMissingOrderFields(true, { customerName: "Buyer", customerEmail: "buyer@example.test" }),
+    ["customerPhone", "canvaEmail"],
+  );
+  assert.deepEqual(
+    getMissingOrderFields(false, {
+      customerName: "Buyer",
+      customerPhone: "123",
+      customerEmail: "buyer@example.test",
+      selectedPlan: "monthly",
+      planPrice: "500",
+      paymentMethod: "Bank Transfer",
+      paymentDetails: "reference",
+      orderDate: "2026-10-25T10:00:00.000Z",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    getMissingOrderFields(true, {
+      customerName: "Buyer",
+      customerEmail: "buyer@example.test",
+      customerPhone: "123",
+      canvaEmail: "buyer@canva.example",
+    }),
+    [],
+  );
+});
+
 test("delivery idempotency only automatically retries known-unsent states", () => {
   assert.equal(getIdempotencyAction("PENDING"), "deliver");
   assert.equal(getIdempotencyAction("FAILED"), "deliver");
   assert.equal(getIdempotencyAction("SENT"), "already-delivered");
   assert.equal(getIdempotencyAction("SENDING"), "in-progress");
   assert.equal(getIdempotencyAction("UNKNOWN"), "manual-reconciliation");
+});
+
+test("successful order responses require confirmed required Telegram deliveries", () => {
+  assert.equal(isOrderSubmissionDelivered(true, "SENT", "PENDING"), true);
+  assert.equal(isOrderSubmissionDelivered(false, "SENT", "SENT"), true);
+  assert.equal(isOrderSubmissionDelivered(false, "SENT", "FAILED"), false);
+  assert.equal(isOrderSubmissionDelivered(false, "FAILED", "SENT"), false);
+  assert.equal(isOrderSubmissionDelivered(false, "UNKNOWN", "UNKNOWN"), false);
 });
 
 test("ambiguous Telegram responses are never treated as retry-safe failures", () => {
@@ -77,6 +120,21 @@ test("order failure diagnostics distinguish database configuration and ENOENT wi
     category: "UNKNOWN",
     errorName: "Error",
   });
+
+  const missingSettingsError = Object.assign(new Error("private settings detail"), {
+    name: "MissingApplicationSettingError",
+  });
+  assert.deepEqual(getSafeOrderSubmissionDiagnostic(missingSettingsError), {
+    category: "APPLICATION_CONFIGURATION",
+    errorName: "MissingApplicationSettingError",
+  });
+  const invalidSettingsError = Object.assign(new Error("private stored-value detail"), {
+    name: "InvalidApplicationSettingError",
+  });
+  assert.deepEqual(getSafeOrderSubmissionDiagnostic(invalidSettingsError), {
+    category: "APPLICATION_CONFIGURATION",
+    errorName: "InvalidApplicationSettingError",
+  });
 });
 
 test("PostgreSQL failures are categorized using SQLSTATE only", () => {
@@ -102,7 +160,24 @@ test("missing Telegram configuration reports only names and is specific to the d
 });
 
 test("order persistence and idempotency lookup happen before Telegram configuration is required", () => {
+  const validation = orderRoute.indexOf("getMissingOrderFields(isTrial, body)");
   assert.ok(orderRoute.indexOf("getOrderByIdempotencyKey(idempotencyKey)") < orderRoute.indexOf("getMissingTelegramConfiguration("));
   assert.ok(orderRoute.indexOf("createOrderIdempotently(storedOrder") < orderRoute.indexOf("getMissingTelegramConfiguration("));
+  assert.ok(validation >= 0 && validation < orderRoute.indexOf("getOrderByIdempotencyKey(idempotencyKey)"));
+  assert.match(orderRoute, /status: 400/);
+  assert.match(orderRoute, /isOrderSubmissionDelivered\(/);
   assert.ok(orderRoute.includes('getIdempotencyAction(existingSubmission.telegramDeliveryStatus)'));
+});
+
+test("orders and receipts are persisted before Telegram delivery is attempted", () => {
+  const orderPersisted = orderRoute.indexOf("createOrderIdempotently(storedOrder");
+  const receiptPersisted = orderRoute.indexOf("await saveReceiptFile({");
+  const telegramAttempted = orderRoute.indexOf("telegramResponse = await fetch");
+  const telegramConfirmed = orderRoute.indexOf('setDeliveryStatus(order.orderId, "telegram", telegramOutcome)');
+
+  assert.ok(orderPersisted >= 0);
+  assert.ok(receiptPersisted > orderPersisted);
+  assert.ok(telegramAttempted > receiptPersisted);
+  assert.ok(telegramConfirmed > telegramAttempted);
+  assert.ok(orderRoute.lastIndexOf("return buildSuccessResponse(order, isTrial)") > telegramConfirmed);
 });
