@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { incrementPromoUsage, validatePromoCodeForPlan } from "@/lib/site-settings";
+import { MissingApplicationSettingError } from "@/lib/application-settings-values";
+import { isPromoValidationRequest } from "@/lib/promo-validation-request";
 
 export async function POST(request: NextRequest) {
   try {
-    const { code, planId, originalPrice } = await request.json();
-    const result = await validatePromoCodeForPlan(String(code || ""), String(planId || ""), Number(originalPrice || 0));
+    const body: unknown = await request.json();
+    if (!isPromoValidationRequest(body)) {
+      return NextResponse.json(
+        { valid: false, message: "Promo code, plan, and a valid price are required." },
+        { status: 400 },
+      );
+    }
+    const { code, planId, originalPrice } = body;
+    const result = await validatePromoCodeForPlan(code, planId, originalPrice);
 
     if (result.valid) {
-      await incrementPromoUsage(String(code || ""));
+      await incrementPromoUsage(code);
     }
 
     return NextResponse.json({
@@ -21,7 +30,22 @@ export async function POST(request: NextRequest) {
       promo: result.promo || null,
     });
   } catch (error) {
-    console.error("Promo validation error:", error);
-    return NextResponse.json({ valid: false, discount: 0, finalPrice: Number(0), message: "Invalid or expired promo code." });
+    if (error instanceof SyntaxError) {
+      return NextResponse.json(
+        { valid: false, message: "Invalid promo validation request." },
+        { status: 400 },
+      );
+    }
+    if (error instanceof MissingApplicationSettingError) {
+      return NextResponse.json(
+        { valid: false, message: "Promo settings have not been restored." },
+        { status: 503 },
+      );
+    }
+    console.error("Promo validation failed.");
+    return NextResponse.json(
+      { valid: false, message: "Unable to validate promo code right now." },
+      { status: 500 },
+    );
   }
 }

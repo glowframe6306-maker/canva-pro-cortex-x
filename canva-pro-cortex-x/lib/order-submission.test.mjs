@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   classifyTelegramResponse,
+  escapeOrderTelegramMessage,
   getMissingOrderFields,
   getIdempotencyAction,
   getMissingTelegramConfiguration,
@@ -25,6 +26,14 @@ const routePath = path.join(
   "route.ts",
 );
 const orderRoute = await readFile(routePath, "utf8");
+
+test("Telegram MarkdownV2 escaping includes literal backslashes", () => {
+  const specialCharacters = ["\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"];
+  assert.equal(
+    escapeOrderTelegramMessage(`${specialCharacters.join("")} plain text`),
+    `${specialCharacters.map((character) => `\\${character}`).join("")} plain text`,
+  );
+});
 
 test("order submission hash is stable regardless of field order", () => {
   const first = hashOrderSubmission([["customerEmail", "buyer@example.test"], ["selectedPlan", "monthly"]]);

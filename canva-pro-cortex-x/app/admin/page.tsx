@@ -234,6 +234,8 @@ export default function AdminPage() {
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"orders" | "refunds" | "promotions" | "settings">("orders");
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const [siteSettingsLoading, setSiteSettingsLoading] = useState(true);
+  const [siteSettingsError, setSiteSettingsError] = useState<string | null>(null);
   const [authStage, setAuthStage] = useState<"loading" | "login" | "pin" | "success" | "verified">("loading");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -408,14 +410,22 @@ export default function AdminPage() {
   };
 
   const fetchSiteSettings = async () => {
+    setSiteSettingsLoading(true);
+    setSiteSettingsError(null);
     try {
       const response = await fetch("/api/site-settings");
       const result = await response.json();
-      if (result.ok) {
-        setSiteSettings(result.settings || null);
+      if (!response.ok || !result.ok || !result.settings) {
+        setSiteSettings(null);
+        setSiteSettingsError(result.error || "Unable to load site settings.");
+        return;
       }
-    } catch (error) {
-      console.error("Failed to load site settings:", error);
+      setSiteSettings(result.settings);
+    } catch {
+      setSiteSettings(null);
+      setSiteSettingsError("Unable to load site settings. Please try again.");
+    } finally {
+      setSiteSettingsLoading(false);
     }
   };
 
@@ -1463,6 +1473,18 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+          </section>
+        )}
+
+        {activeTab === "settings" && !siteSettings && (
+          <section className="space-y-4 rounded-[28px] border border-white/10 bg-slate-900/60 p-5">
+            <h2 className="text-2xl font-black text-white">Website Features</h2>
+            <p role="alert" className="text-sm text-rose-200">
+              {siteSettingsLoading ? "Loading site settings..." : siteSettingsError}
+            </p>
+            {!siteSettingsLoading && (
+              <AdminButton variant="outline" onClick={fetchSiteSettings}>Retry loading settings</AdminButton>
+            )}
           </section>
         )}
           </main>

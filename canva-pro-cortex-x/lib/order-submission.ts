@@ -81,6 +81,10 @@ export async function sendTelegramMessage(
   }
 }
 
+export function escapeOrderTelegramMessage(text: string): string {
+  return String(text || "").replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
+}
+
 export function getIdempotencyAction(status: DeliveryStatus): IdempotencyAction {
   if (status === "SENT") return "already-delivered";
   if (status === "PENDING" || status === "FAILED") return "deliver";

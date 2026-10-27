@@ -200,3 +200,36 @@ test("active promotion API reports storage failures instead of a success-shaped 
   assert.match(activePromotionRoute, /status: 500/);
   assert.doesNotMatch(activePromotionRoute, /ok: true,\s*promotion: null/);
 });
+
+test("settings and promotions admin views surface missing-setting load failures", async () => {
+  const [adminPage, promotionsManagement] = await Promise.all([
+    readFile(path.join(root, "app", "admin", "page.tsx"), "utf8"),
+    readFile(path.join(root, "components", "promotions-management.tsx"), "utf8"),
+  ]);
+
+  assert.match(adminPage, /!response\.ok \|\| !result\.ok \|\| !result\.settings/);
+  assert.match(adminPage, /siteSettingsError/);
+  assert.match(adminPage, /role="alert"/);
+  assert.match(adminPage, /Retry loading settings/);
+  assert.match(promotionsManagement, /!response\.ok \|\| !data\.ok \|\| !Array\.isArray\(data\.promotions\)/);
+  assert.match(promotionsManagement, /loadError/);
+  assert.match(promotionsManagement, /<AdminButton variant="outline" size="sm" onClick=\{fetchPromotions\}>Retry/);
+  assert.match(promotionsManagement, /disabled=\{Boolean\(loadError\)\}/);
+  assert.match(promotionsManagement, /loadError \? null : promotions\.length === 0/);
+});
+
+test("promo validation reports invalid requests and missing settings with explicit HTTP errors", async () => {
+  const [route, requestValidator] = await Promise.all([
+    readFile(path.join(root, "app", "api", "site-settings", "promo", "route.ts"), "utf8"),
+    readFile(path.join(root, "lib", "promo-validation-request.ts"), "utf8"),
+  ]);
+
+  assert.match(route, /isPromoValidationRequest\(body\)/);
+  assert.match(route, /status: 400/);
+  assert.match(route, /MissingApplicationSettingError/);
+  assert.match(route, /status: 503/);
+  assert.match(route, /status: 500/);
+  assert.doesNotMatch(route, /finalPrice: Number\(0\)|Invalid or expired promo code/);
+  assert.match(requestValidator, /Number\.isFinite\(request\.originalPrice\)/);
+  assert.match(requestValidator, /request\.originalPrice >= 0/);
+});

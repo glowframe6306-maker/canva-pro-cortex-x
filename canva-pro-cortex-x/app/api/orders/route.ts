@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   classifyTelegramResponse,
+  escapeOrderTelegramMessage,
   getMissingOrderFields,
   getIdempotencyAction,
   getMissingTelegramConfiguration,
@@ -23,7 +24,7 @@ import {
   markTrialNextMessageSent,
   setDeliveryStatus,
 } from "@/lib/order-database";
-import { buildNewOrderMessage, buildTrialRequestMessage, buildNextMessage, escapeMarkdown } from "@/lib/telegram-messages";
+import { buildNewOrderMessage, buildTrialRequestMessage, buildNextMessage } from "@/lib/telegram-messages";
 import type { StoredOrder } from "@/lib/order-database";
 import { getMainPlanPrice, getPromotionPriceForPlan, resolvePlanPricing } from "@/lib/pricing";
 import { getActivePromotion } from "@/lib/promotion-database";
@@ -406,7 +407,7 @@ export async function POST(request: NextRequest) {
           fetch,
           telegramBotToken,
           telegramChatId,
-          escapeMarkdown(telegramMessageText),
+          escapeOrderTelegramMessage(telegramMessageText),
         );
         const telegramOutcome = telegramDelivery.outcome;
         if (telegramOutcome !== "SENT") {
@@ -443,7 +444,7 @@ export async function POST(request: NextRequest) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               chat_id: FREE_TRIAL_CHAT_ID,
-              text: escapeMarkdown(buildNextMessage()),
+              text: escapeOrderTelegramMessage(buildNextMessage()),
               parse_mode: "MarkdownV2",
               disable_web_page_preview: true,
             }),
@@ -526,7 +527,7 @@ export async function POST(request: NextRequest) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               chat_id: TELEGRAM_CHAT_ID,
-              text: escapeMarkdown(buildNextMessage()),
+              text: escapeOrderTelegramMessage(buildNextMessage()),
               parse_mode: "MarkdownV2",
               disable_web_page_preview: true,
             }),

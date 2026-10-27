@@ -89,6 +89,7 @@ function createEmptyPlanPrices() {
 export function PromotionsManagement() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingPromo, setEditingPromo] = useState<Promotion | null>(null);
   const [saving, setSaving] = useState(false);
@@ -114,13 +115,18 @@ export function PromotionsManagement() {
   const fetchPromotions = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const response = await fetch("/api/admin/promotions");
       const data = await response.json();
-      if (data.ok) {
-        setPromotions(data.promotions || []);
+      if (!response.ok || !data.ok || !Array.isArray(data.promotions)) {
+        setPromotions([]);
+        setLoadError(data.error || "Unable to load promotions.");
+        return;
       }
-    } catch (error) {
-      console.error("Failed to fetch promotions:", error);
+      setPromotions(data.promotions);
+    } catch {
+      setPromotions([]);
+      setLoadError("Unable to load promotions. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -286,8 +292,15 @@ export function PromotionsManagement() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-2xl font-black text-white">🎯 Promotions / Offers</h2>
-        <AdminButton variant="primary" onClick={handleAddNew} icon="➕">New Promotion</AdminButton>
+        <AdminButton variant="primary" onClick={handleAddNew} disabled={Boolean(loadError)} icon="➕">New Promotion</AdminButton>
       </div>
+
+      {loadError && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <span>{loadError}</span>
+          <AdminButton variant="outline" size="sm" onClick={fetchPromotions}>Retry</AdminButton>
+        </div>
+      )}
 
       {showForm && (
         <div className="space-y-6 rounded-2xl border border-cyan-400/20 bg-slate-900/60 p-6">
@@ -425,7 +438,7 @@ export function PromotionsManagement() {
       )}
 
       <div className="space-y-3">
-        {promotions.length === 0 ? (
+        {loadError ? null : promotions.length === 0 ? (
           <div className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-6 text-center text-slate-400">No promotions yet. Create one to get started!</div>
         ) : (
           promotions.map((promo) => {
