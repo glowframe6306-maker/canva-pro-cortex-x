@@ -41,20 +41,11 @@ export function calculatePlanPricing(input: {
   let priceSource: CalculatedPricing["priceSource"] = hasActivePromotion ? "promotion" : "main";
 
   if (input.promoCode) {
-    const promoValuePrice = Math.max(0, mainPrice - enteredPromoDiscount);
-
-    if (hasActivePromotion && input.discountStacking) {
-      promoCodeApplied = true;
-      appliedPromoDiscount = Math.min(enteredPromoDiscount, promotionPrice);
-      finalPrice = promotionPrice - appliedPromoDiscount;
-      priceSource = "stacked";
-    } else if (!hasActivePromotion || promoValuePrice < promotionPrice) {
-      promotionApplied = false;
-      promoCodeApplied = true;
-      appliedPromoDiscount = enteredPromoDiscount;
-      finalPrice = promoValuePrice;
-      priceSource = "promo-code";
-    }
+    promotionApplied = false;
+    promoCodeApplied = true;
+    appliedPromoDiscount = enteredPromoDiscount;
+    finalPrice = Math.max(0, mainPrice - enteredPromoDiscount);
+    priceSource = "promo-code";
   }
 
   return {
@@ -73,4 +64,16 @@ export function calculatePlanPricing(input: {
     promoCodeApplied,
     priceSource,
   };
+}
+
+export function calculateCheckoutPlanPrice(input: {
+  mainPrice: number;
+  promotionPrice?: number;
+  promoCode?: string;
+  promoDiscount?: number;
+}): number {
+  return calculatePlanPricing({
+    ...input,
+    discountStacking: false,
+  }).finalPrice;
 }

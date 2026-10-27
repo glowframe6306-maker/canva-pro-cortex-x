@@ -14,6 +14,7 @@ import {
   PromoCodeWidget,
 } from "@/components/site-feature-widgets";
 import { PromotionCountdown } from "@/components/promotion-countdown";
+import { calculateCheckoutPlanPrice } from "@/lib/pricing-calculation";
 
 type OrderForm = {
   fullName: string;
@@ -465,14 +466,12 @@ export default function MicortexAppPremium() {
 
   const getEffectivePlanPrice = (planId: string, normalPrice: number) => {
     const normalized = (planId || "").toLowerCase();
-    let finalPrice = normalPrice;
-
     const planEntry = activePromotion?.planPrices?.[normalized];
     const applicableList = activePromotion?.applicablePlans?.length ? activePromotion.applicablePlans : Object.keys(activePromotion?.planPrices || {});
-    if (activePromotion && planEntry && planEntry.enabled && applicableList.includes(normalized)) {
-      const promotionalPrice = Number(planEntry.promotionalPrice ?? normalPrice);
-      finalPrice = promotionalPrice < normalPrice ? promotionalPrice : normalPrice;
-    }
+    const promotionApplies = Boolean(activePromotion && planEntry && planEntry.enabled && applicableList.includes(normalized));
+    const promotionalPrice = promotionApplies
+      ? Number(planEntry.promotionalPrice ?? normalPrice)
+      : undefined;
 
     if (customerPromo) {
       const promoApplicablePlans = (customerPromo.applicablePlans || []).map((item) => String(item).toLowerCase());
@@ -480,13 +479,20 @@ export default function MicortexAppPremium() {
       if (appliesToPlan) {
         const percentDiscount = Number(customerPromo.discountPercentage || 0);
         const discountRange = percentDiscount > 0
-          ? Math.min(finalPrice, Math.round((finalPrice * percentDiscount) / 100))
-          : Math.min(finalPrice, Number(customerPromo.discount || 0));
-        finalPrice = Math.max(0, finalPrice - discountRange);
+          ? Math.min(normalPrice, Math.round((normalPrice * percentDiscount) / 100))
+          : Math.min(normalPrice, Number(customerPromo.discount || 0));
+        return calculateCheckoutPlanPrice({
+          mainPrice: normalPrice,
+          promoCode: customerPromo.code,
+          promoDiscount: discountRange,
+        });
       }
     }
 
-    return finalPrice;
+    return calculateCheckoutPlanPrice({
+      mainPrice: normalPrice,
+      promotionPrice: promotionalPrice,
+    });
   };
 
   const getEffectivePlanDisplay = (planId: string, normalPrice: number) => {

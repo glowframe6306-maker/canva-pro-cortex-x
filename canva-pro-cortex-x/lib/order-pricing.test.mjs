@@ -7,7 +7,7 @@ import ts from "typescript";
 
 import { getOrderPricingFields } from "./order-pricing.ts";
 import { getOrderPricingLines } from "./order-pricing.ts";
-import { calculatePlanPricing } from "./pricing-calculation.ts";
+import { calculateCheckoutPlanPrice, calculatePlanPricing } from "./pricing-calculation.ts";
 import { validatePromoCodeForPlanInList } from "./promo-code-utils.ts";
 import {
   InvalidApplicationSettingError,
@@ -240,7 +240,7 @@ test("active zero-price promotion is not mistaken for a missing promotion", asyn
   assert.match(message, /Final Payable Price: LKR 0/);
 });
 
-test("promotion precedence omits a valid code when the promotion remains the chosen price", async () => {
+test("valid promo code takes priority over a larger automatic promotion", async () => {
   const state = await resolvePricing({
     promotion: { price: 800 },
     validCode: "SAVE5",
@@ -250,14 +250,15 @@ test("promotion precedence omits a valid code when the promotion remains the cho
   const message = buildNewOrderMessage(order);
 
   assert.equal(order.promoCode, "SAVE5");
-  assert.equal(order.promoCodeApplied, false);
-  assert.equal(order.discountType, "PROMOTION");
-  assert.match(message, /Promotion: Seasonal/);
-  assert.match(message, /Promo Code: SAVE5 \(not applied; promotion price selected\)/);
-  assert.match(message, /Final Payable Price: LKR 800/);
+  assert.equal(order.promoCodeApplied, true);
+  assert.equal(order.discountType, "PROMO_CODE");
+  assert.equal(order.promotionPrice, undefined);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promo Code: SAVE5/);
+  assert.match(message, /Final Payable Price: LKR 950/);
 });
 
-test("valid promo entry does not hide an active promotion when the promo code wins precedence", async () => {
+test("valid promo entry suppresses the active promotion in checkout and order pricing", async () => {
   const activeOffer = { price: 900, name: "Seasonal" };
   const withoutCode = await resolvePricing({ promotion: activeOffer }, undefined);
   const withValidCode = await resolvePricing({
@@ -275,16 +276,46 @@ test("valid promo entry does not hide an active promotion when the promo code wi
   const message = buildNewOrderMessage(order);
   assert.equal(order.promotionApplied, false);
   assert.equal(order.promoCodeApplied, true);
-  assert.equal(order.promotionDiscountAmount, 100);
+  assert.equal(order.promotionPrice, undefined);
+  assert.equal(order.promotionDiscountAmount, undefined);
   assert.equal(order.promoDiscountAmount, 150);
   assert.equal(order.discountAmount, 150);
   assert.equal(order.finalPrice, 850);
-  assert.match(message, /Promotion: Seasonal \(not applied; promo code price selected\)/);
-  assert.match(message, /Promotion Discount Amount: LKR 100 \(not applied\)/);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promotion Discount Amount: LKR 0/);
   assert.match(message, /Promo Code: SAVE30/);
   assert.match(message, /Promo Code Discount Amount: LKR 150/);
   assert.match(message, /Total Discount Amount: LKR 150/);
   assert.match(message, /Final Payable Price: LKR 850/);
+});
+
+test("removing a valid promo code restores an eligible active promotion", async () => {
+  const activeOffer = { price: 900, name: "Seasonal" };
+  const withPromoCode = await resolvePricing({
+    promotion: activeOffer,
+    validCode: "SAVE20",
+    promoDiscount: 200,
+  }, "SAVE20");
+  const afterRemoval = await resolvePricing({ promotion: activeOffer }, undefined);
+
+  assert.equal(withPromoCode.finalPrice, 800);
+  assert.equal(afterRemoval.priceSource, "promotion");
+  assert.equal(afterRemoval.finalPrice, 900);
+  assert.equal(afterRemoval.promotionApplied, true);
+  assert.equal(afterRemoval.promoCode, null);
+});
+
+test("checkout price uses the code alone while applied and restores promotion after removal or rejection", () => {
+  const activeOffer = { mainPrice: 1000, promotionPrice: 900 };
+  assert.equal(calculateCheckoutPlanPrice(activeOffer), 900);
+  assert.equal(calculateCheckoutPlanPrice({
+    ...activeOffer,
+    promoCode: "SAVE20",
+    promoDiscount: 200,
+  }), 800);
+  assert.equal(calculateCheckoutPlanPrice(activeOffer), 900);
+  assert.equal(calculateCheckoutPlanPrice(activeOffer), 900);
+  assert.match(client, /calculateCheckoutPlanPrice/);
 });
 
 test("invalid promo entry leaves the same active promotion applied", async () => {
@@ -305,7 +336,7 @@ test("invalid promo entry leaves the same active promotion applied", async () =>
   assert.match(message, /Final Payable Price: LKR 900/);
 });
 
-test("stacked promotion reports each validated discount and the final total", async () => {
+test("promo priority does not enable discount stacking", async () => {
   const state = await resolvePricing({
     promotion: { price: 900 },
     validCode: "SAVE10",
@@ -315,14 +346,16 @@ test("stacked promotion reports each validated discount and the final total", as
   const order = telegramOrder(state, { promotionName: "Seasonal" });
   const message = buildNewOrderMessage(order);
 
-  assert.equal(order.discountType, "PROMOTION + PROMO_CODE");
-  assert.equal(order.promotionApplied, true);
+  assert.equal(order.discountType, "PROMO_CODE");
+  assert.equal(order.promotionApplied, false);
   assert.equal(order.promoCodeApplied, true);
-  assert.equal(order.discountAmount, 200);
-  assert.match(message, /Promotion Discount Amount: LKR 100/);
+  assert.equal(order.discountAmount, 100);
+  assert.equal(order.promotionPrice, undefined);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promotion Discount Amount: LKR 0/);
   assert.match(message, /Promo Code Discount Amount: LKR 100/);
-  assert.match(message, /Total Discount Amount: LKR 200/);
-  assert.match(message, /Final Payable Price: LKR 800/);
+  assert.match(message, /Total Discount Amount: LKR 100/);
+  assert.match(message, /Final Payable Price: LKR 900/);
 });
 
 test("a better promo code wins when stacking is prohibited", async () => {
@@ -336,7 +369,8 @@ test("a better promo code wins when stacking is prohibited", async () => {
 
   assert.equal(order.discountType, "PROMO_CODE");
   assert.equal(order.finalPrice, 800);
-  assert.match(message, /Promotion: Seasonal \(not applied; promo code price selected\)/);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promotion Discount Amount: LKR 0/);
   assert.match(message, /Promo Code: SAVE20/);
   assert.match(message, /Total Discount Amount: LKR 200/);
 });
@@ -473,7 +507,8 @@ test("notification pricing details match persisted server-computed order fields"
   assert.equal(order.mainPrice - order.finalPrice, order.discountAmount);
   assert.equal(order.finalPrice, Number(order.planPrice));
   assert.match(message, /Original Price: LKR 1,000/);
-  assert.match(message, /Total Discount Amount: LKR 200/);
-  assert.match(message, /Final Payable Price: LKR 800/);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Total Discount Amount: LKR 100/);
+  assert.match(message, /Final Payable Price: LKR 900/);
   assert.match(message, /Currency: LKR/);
 });

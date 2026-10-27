@@ -245,8 +245,8 @@ export async function POST(request: NextRequest) {
       expiryTime: requestExpiryDateTime.time,
       planType: requestPlanType === "YEARLY" ? "YEARLY" : requestPlanType || undefined,
       duration: requestPlanType ? getPlanDurationDisplay(requestPlanType) : undefined,
-      promotionName: priceState.promotionName,
-      promotionId: priceState.promotionId,
+      promotionName: priceState.promotionApplied ? priceState.promotionName : undefined,
+      promotionId: priceState.promotionApplied ? priceState.promotionId : undefined,
       ...getOrderPricingFields(priceState),
     };
 

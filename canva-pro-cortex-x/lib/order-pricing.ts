@@ -25,14 +25,15 @@ export function getOrderPricingFields(pricing: PricingState): Pick<
     "promo-code": "PROMO_CODE",
     stacked: "PROMOTION + PROMO_CODE",
   }[pricing.priceSource] as NonNullable<StoredOrder["discountType"]>;
+  const promotionWasApplied = pricing.promotionApplied;
 
   return {
     mainPrice: pricing.mainPrice,
-    promotionPrice: pricing.hasActivePromotion ? pricing.promotionPrice : undefined,
-    promotionDiscountPercentage: pricing.hasActivePromotion && pricing.mainPrice > 0
+    promotionPrice: promotionWasApplied ? pricing.promotionPrice : undefined,
+    promotionDiscountPercentage: promotionWasApplied && pricing.mainPrice > 0
       ? Math.round((pricing.promotionDiscount / pricing.mainPrice) * 100)
       : undefined,
-    promotionDiscountAmount: pricing.hasActivePromotion ? pricing.promotionDiscount : undefined,
+    promotionDiscountAmount: promotionWasApplied ? pricing.promotionDiscount : undefined,
     promotionApplied: pricing.promotionApplied,
     promoCode: pricing.promoCode?.toUpperCase() || undefined,
     promoCodeOfferDiscountAmount: pricing.promoCode ? pricing.promoDiscount : undefined,
