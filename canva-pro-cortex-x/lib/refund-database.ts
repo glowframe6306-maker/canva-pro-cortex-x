@@ -1,83 +1,11 @@
-/**
- * Refund request persistence and tracking
- */
+import { getPostgresClient } from "@/lib/postgres";
+import { createRefundStore } from "@/lib/refund-store";
+import type { RefundRequest, RefundStatus, RefundDeliveryStatus } from "@/lib/refund-store";
 
-import fs from "node:fs/promises";
-import path from "node:path";
+export type { RefundRequest, RefundStatus, RefundDeliveryStatus } from "@/lib/refund-store";
 
-export type RefundStatus = "PENDING" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "PROCESSED";
-
-export type RefundRequest = {
-  refundRequestId: string;
-  refundCode: string;
-  orderNumber: string;
-  referenceNumber: string;
-  customerName: string;
-  email: string;
-  whatsapp: string;
-  canvaEmail: string;
-  refundReason: string;
-  additionalDetails?: string;
-  originalPlan?: string;
-  originalPlanType?: "WEEKLY" | "MONTHLY" | "YEARLY" | "FREE_TRIAL" | "LIFETIME";
-  originalPaidAmount?: number;
-  requestedRefundAmount?: number;
-  startedAt?: string;
-  startedDate?: string;
-  startedTime?: string;
-  expiresAt?: string;
-  expiresDate?: string;
-  expiresTime?: string;
-  refundEligibleUntil?: string;
-  refundEligibleUntilDate?: string;
-  refundEligibleUntilTime?: string;
-  orderCreatedAt?: string;
-  subscriptionStartedAt?: string;
-  subscriptionExpiresAt?: string;
-  activationStatus?: string;
-  orderStatus?: string;
-  paymentStatus?: string;
-  plan?: string;
-  paidAmount?: number;
-  submittedAt: string;
-  createdAt?: string;
-  updatedAt?: string;
-  status: RefundStatus;
-  telegramNotificationStatus?: "PENDING" | "SENT" | "FAILED";
-  nextMessageStatus?: "PENDING" | "SENT" | "FAILED";
-  telegramSent?: boolean;
-};
-
-const DEFAULT_PAYMENTS_DIR = path.join("C:\\Users\\Administrator\\CANVA PRO", "PAYMENTS");
-
-function getRefundsDir(): string {
-  return process.env.ORDERS_DIR || DEFAULT_PAYMENTS_DIR;
-}
-
-function getRefundRequestsFilePath(): string {
-  return path.join(getRefundsDir(), ".refund-requests.json");
-}
-
-function getRefundCounterFilePath(): string {
-  return path.join(getRefundsDir(), ".refund-counter.json");
-}
-
-async function ensureRefundDatabase() {
-  const dir = getRefundsDir();
-  const file = getRefundRequestsFilePath();
-  await fs.mkdir(dir, { recursive: true });
-
-  try {
-    await fs.access(file);
-  } catch {
-    await fs.writeFile(file, JSON.stringify({ requests: [] }, null, 2), "utf8");
-  }
-
-  try {
-    await fs.access(getRefundCounterFilePath());
-  } catch {
-    await fs.writeFile(getRefundCounterFilePath(), JSON.stringify({ count: 0 }, null, 2), "utf8");
-  }
+function getStore() {
+  return createRefundStore(getPostgresClient());
 }
 
 export function generateRefundCode(): string {
@@ -89,75 +17,50 @@ export function generateRefundCode(): string {
   return result;
 }
 
-export async function generateRefundRequestId(): Promise<string> {
-  await ensureRefundDatabase();
-  const counterPath = getRefundCounterFilePath();
-  const raw = await fs.readFile(counterPath, "utf8").catch(() => JSON.stringify({ count: 0 }));
-  const parsed = JSON.parse(raw || "{\"count\":0}");
-  const nextCount = Number(parsed.count || 0) + 1;
-  await fs.writeFile(counterPath, JSON.stringify({ count: nextCount }, null, 2), "utf8");
-  const year = new Date().getFullYear();
-  return `REF-${year}-${String(nextCount).padStart(6, "0")}`;
+export function generateRefundRequestId(): Promise<string> {
+  return getStore().generateRefundRequestId();
 }
 
-export async function saveRefundRequest(request: RefundRequest): Promise<RefundRequest> {
-  await ensureRefundDatabase();
-  const file = getRefundRequestsFilePath();
-  const raw = await fs.readFile(file, "utf8").catch(() => JSON.stringify({ requests: [] }));
-  const parsed = JSON.parse(raw || "{\"requests\":[]}");
-  const requests = Array.isArray(parsed.requests) ? parsed.requests : [];
-  const prepared = {
-    ...request,
-    createdAt: request.createdAt || request.submittedAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    status: request.status || "PENDING",
-  };
-
-  requests.push(prepared);
-  await fs.writeFile(file, JSON.stringify({ requests }, null, 2), "utf8");
-  return prepared;
+export function saveRefundRequest(
+  request: RefundRequest,
+): Promise<{ request: RefundRequest; created: boolean }> {
+  return getStore().saveRefundRequest(request);
 }
 
-export async function getAllRefundRequests(): Promise<RefundRequest[]> {
-  await ensureRefundDatabase();
-  const file = getRefundRequestsFilePath();
-  try {
-    const raw = await fs.readFile(file, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed.requests) ? parsed.requests : [];
-  } catch {
-    return [];
-  }
+export function getAllRefundRequests(): Promise<RefundRequest[]> {
+  return getStore().getAllRefundRequests();
 }
 
-export async function getRefundRequestById(refundRequestId: string): Promise<RefundRequest | null> {
-  const requests = await getAllRefundRequests();
-  return requests.find((request) => request.refundRequestId === refundRequestId) || null;
+export function getRefundRequestById(refundRequestId: string): Promise<RefundRequest | null> {
+  return getStore().getRefundRequestById(refundRequestId);
 }
 
-export async function getRefundRequestByOrderNumber(orderNumber: string): Promise<RefundRequest | null> {
-  const requests = await getAllRefundRequests();
-  return requests.find((request) => request.orderNumber === orderNumber) || null;
+export function getRefundRequestByOrderNumber(orderNumber: string): Promise<RefundRequest | null> {
+  return getStore().getRefundRequestByOrderNumber(orderNumber);
 }
 
-export async function updateRefundRequestStatus(refundRequestId: string, status: RefundStatus): Promise<RefundRequest | null> {
-  await ensureRefundDatabase();
-  const file = getRefundRequestsFilePath();
-  const raw = await fs.readFile(file, "utf8").catch(() => JSON.stringify({ requests: [] }));
-  const parsed = JSON.parse(raw || "{\"requests\":[]}");
-  const requests = Array.isArray(parsed.requests) ? parsed.requests : [];
-  const index = requests.findIndex((request: RefundRequest) => request.refundRequestId === refundRequestId);
-
-  if (index === -1) {
-    return null;
-  }
-
-  requests[index] = { ...requests[index], status, updatedAt: new Date().toISOString() };
-  await fs.writeFile(file, JSON.stringify({ requests }, null, 2), "utf8");
-  return requests[index];
+export function updateRefundRequestStatus(
+  refundRequestId: string,
+  status: RefundStatus,
+): Promise<RefundRequest | null> {
+  return getStore().updateRefundRequestStatus(refundRequestId, status);
 }
 
-export async function hasActiveRefundRequest(orderNumber: string): Promise<boolean> {
-  const request = await getRefundRequestByOrderNumber(orderNumber);
-  return !!request && ["PENDING", "UNDER_REVIEW", "APPROVED"].includes(request.status);
+export function hasActiveRefundRequest(orderNumber: string): Promise<boolean> {
+  return getStore().hasActiveRefundRequest(orderNumber);
+}
+
+export function claimRefundDelivery(
+  refundRequestId: string,
+  kind: "telegram" | "next",
+): Promise<boolean> {
+  return getStore().claimRefundDelivery(refundRequestId, kind);
+}
+
+export function setRefundDeliveryStatus(
+  refundRequestId: string,
+  kind: "telegram" | "next",
+  status: RefundDeliveryStatus,
+): Promise<void> {
+  return getStore().setRefundDeliveryStatus(refundRequestId, kind, status);
 }

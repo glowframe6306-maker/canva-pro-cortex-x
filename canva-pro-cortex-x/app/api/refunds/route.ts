@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOrderById, getOrderByOrderNumber, getAllOrders } from "@/lib/order-database";
 import { getDateTimeInTimezone } from "@/lib/expiry-calculator";
 import { buildNextMessage, buildRefundRequestMessage, escapeMarkdown } from "@/lib/telegram-messages";
-import { generateRefundCode, generateRefundRequestId, saveRefundRequest, hasActiveRefundRequest } from "@/lib/refund-database";
+import {
+  claimRefundDelivery,
+  generateRefundCode,
+  generateRefundRequestId,
+  saveRefundRequest,
+  setRefundDeliveryStatus,
+} from "@/lib/refund-database";
+import { sendRefundTelegramMessage } from "@/lib/refund-telegram";
 
 const REFUND_BOT_TOKEN = process.env.REFUND_BOT_TOKEN;
 const REFUND_CHAT_ID = process.env.REFUND_CHAT_ID;
@@ -321,15 +328,6 @@ export async function POST(request: NextRequest) {
     // ============================================================
     // STEP 15: Check for Duplicate Refund Request
     // ============================================================
-    const hasExisting = await hasActiveRefundRequest(orderNumber);
-    if (hasExisting) {
-      return NextResponse.json({
-        ok: false,
-        error: "REFUND REQUEST ALREADY EXISTS",
-        message: "A refund request has already been submitted for this Order Number.",
-      }, { status: 400 });
-    }
-
     // ============================================================
     // ALL VALIDATION PASSED - Create Refund Request
     // ============================================================
@@ -384,63 +382,101 @@ export async function POST(request: NextRequest) {
       telegramSent: false,
     };
 
-    const saved = await saveRefundRequest(refundRequest);
+    const savedResult = await saveRefundRequest(refundRequest);
+    const saved = savedResult.request;
 
     // ============================================================
     // STEP 16: Send to Telegram Bot ONLY after all checks pass
     // ============================================================
     if (!REFUND_BOT_TOKEN || !REFUND_CHAT_ID) {
       return NextResponse.json({
-        ok: true,
+        ok: false,
         refundRequestId: saved.refundRequestId,
         refundCode: saved.refundCode,
         status: saved.status,
-        message: "Refund request recorded. Telegram notification is not configured yet.",
-      }, { status: 202 });
+        error: "REFUND NOTIFICATION UNAVAILABLE",
+        message: "The refund request could not be delivered. Please contact support.",
+      }, { status: 503 });
     }
 
-    const message = buildRefundRequestMessage(saved);
-    const telegramResponse = await fetch(`https://api.telegram.org/bot${REFUND_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: REFUND_CHAT_ID,
-        text: escapeMarkdown(message),
-        parse_mode: "MarkdownV2",
-        disable_web_page_preview: true,
-      }),
-    });
-    const payload = await telegramResponse.json().catch(() => ({}));
+    const claimed = await claimRefundDelivery(saved.refundRequestId, "telegram");
+    if (!claimed) {
+      if (saved.telegramNotificationStatus === "SENT") {
+        return NextResponse.json({
+          ok: false,
+          error: "REFUND REQUEST ALREADY EXISTS",
+          message: "A refund request has already been submitted for this Order Number.",
+        }, { status: 400 });
+      }
+      return NextResponse.json({
+        ok: false,
+        refundRequestId: saved.refundRequestId,
+        error: "REFUND NOTIFICATION IN PROGRESS",
+        message: "The refund request is being processed. Please contact support if you do not receive confirmation.",
+      }, { status: 503 });
+    }
+
+    const delivery = await sendRefundTelegramMessage(
+      fetch,
+      REFUND_BOT_TOKEN,
+      REFUND_CHAT_ID,
+      escapeMarkdown(buildRefundRequestMessage(saved)),
+    );
+    if (delivery.status !== "SENT") {
+      await setRefundDeliveryStatus(saved.refundRequestId, "telegram", delivery.status);
+      console.error(
+        delivery.status === "UNKNOWN"
+          ? "Refund Telegram request could not be confirmed:"
+          : "Refund Telegram delivery was rejected:",
+        delivery.status === "UNKNOWN"
+          ? { category: "NETWORK", errorName: delivery.errorName }
+          : {
+            category: "TELEGRAM_REJECTION",
+            httpStatus: delivery.httpStatus,
+            ...(delivery.errorCode ? { telegramErrorCode: delivery.errorCode } : {}),
+          },
+      );
+      return NextResponse.json({
+        ok: false,
+        refundRequestId: saved.refundRequestId,
+        error: "REFUND REQUEST COULD NOT BE SENT",
+        message: delivery.status === "UNKNOWN"
+          ? "The refund request delivery could not be confirmed. Please contact support before trying again."
+          : "The refund request could not be submitted at this time. Please try again later.",
+        retryable: delivery.status === "FAILED",
+      }, { status: 503 });
+    }
 
     // ============================================================
     // STEP 17: Telegram Failure Handling
     // ============================================================
-    if (!telegramResponse.ok || !payload.ok) {
-      console.error("REFUND TELEGRAM ERROR:", payload.description || "Refund notification failed");
-      return NextResponse.json({
-        ok: false,
-        error: "REFUND REQUEST COULD NOT BE SENT",
-        message: "The refund request could not be submitted at this time. Please try again later.",
-        refundRequestId: saved.refundRequestId,
-        retryable: true,
-      }, { status: 503 });
-    }
+    await setRefundDeliveryStatus(saved.refundRequestId, "telegram", "SENT");
 
-    // Send follow-up message
-    const nextMessage = buildNextMessage();
-    await fetch(`https://api.telegram.org/bot${REFUND_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: REFUND_CHAT_ID,
-        text: escapeMarkdown(nextMessage),
-        parse_mode: "MarkdownV2",
-        disable_web_page_preview: true,
-      }),
-    }).catch((error) => {
-      console.error("REFUND NEXT MESSAGE ERROR:", error);
-      // Don't fail if follow-up message fails
-    });
+    const nextMessageClaimed = await claimRefundDelivery(saved.refundRequestId, "next");
+    if (nextMessageClaimed) {
+      try {
+        const nextDelivery = await sendRefundTelegramMessage(
+          fetch,
+          REFUND_BOT_TOKEN,
+          REFUND_CHAT_ID,
+          escapeMarkdown(buildNextMessage()),
+        );
+        await setRefundDeliveryStatus(
+          saved.refundRequestId,
+          "next",
+          nextDelivery.status,
+        );
+        if (nextDelivery.status !== "SENT") {
+          console.error("Refund follow-up Telegram delivery was not confirmed:", {
+            category: nextDelivery.status === "UNKNOWN" ? "NETWORK" : "TELEGRAM_REJECTION",
+            ...(nextDelivery.status === "FAILED" ? { httpStatus: nextDelivery.httpStatus } : {}),
+          });
+        }
+      } catch {
+        await setRefundDeliveryStatus(saved.refundRequestId, "next", "UNKNOWN");
+        console.error("Refund follow-up Telegram delivery status could not be saved.");
+      }
+    }
 
     // ============================================================
     // STEP 18: Success Response
@@ -457,11 +493,31 @@ export async function POST(request: NextRequest) {
       createdAt: saved.createdAt,
     }, { status: 200 });
   } catch (error) {
-    console.error("REFUND API ERROR:", error instanceof Error ? error.message : String(error));
+    console.error("Refund API request failed:", getSafeErrorDiagnostic(error));
     return NextResponse.json({
       ok: false,
       error: "Unable to process refund request.",
       message: "An unexpected error occurred. Please try again later.",
     }, { status: 500 });
   }
+}
+
+function getSafeErrorName(error: unknown): string {
+  if (!(error instanceof Error)) return "UnknownError";
+  return ["Error", "TypeError", "SyntaxError", "RangeError", "NeonDbError", "PostgresError", "FetchError", "AbortError"]
+    .includes(error.name) ? error.name : "Error";
+}
+
+function getSafeErrorDiagnostic(error: unknown): { category: string; errorName: string; code?: string } {
+  const errorName = getSafeErrorName(error);
+  const rawCode = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  const code = typeof rawCode === "string" && /^[0-9A-Z]{5}$/.test(rawCode) ? rawCode : undefined;
+  const category = code
+    ? "DATABASE"
+    : rawCode === "ENOENT" || rawCode === "EACCES" || rawCode === "EROFS"
+      ? "FILESYSTEM"
+      : errorName === "FetchError" || errorName === "AbortError"
+        ? "NETWORK"
+        : "APPLICATION";
+  return { category, errorName, ...(code ? { code } : {}) };
 }

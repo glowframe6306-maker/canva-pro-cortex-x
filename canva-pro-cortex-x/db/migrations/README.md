@@ -1,6 +1,6 @@
 # Database migrations and settings import
 
-Apply `001_order_storage.sql` and then `002_application_settings.sql` to an explicitly selected, authorized non-production database before testing order submission. Migration `002` creates the settings table but intentionally does not seed it.
+Apply `001_order_storage.sql`, `002_application_settings.sql`, and then `003_refund_request_storage.sql` to an explicitly selected, authorized non-production database before testing the corresponding features. Migration `002` creates the settings table but intentionally does not seed it. Migration `003` creates durable refund-request storage and its active-order uniqueness constraint; it does not import historical refund JSON files, so reconcile any existing records before applying it to an environment that used the file-based store.
 
 ## Importing existing settings
 
