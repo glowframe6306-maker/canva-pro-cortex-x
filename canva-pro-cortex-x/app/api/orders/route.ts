@@ -26,9 +26,9 @@ import {
 } from "@/lib/order-database";
 import { buildNewOrderMessage, buildTrialRequestMessage, buildNextMessage } from "@/lib/telegram-messages";
 import type { StoredOrder } from "@/lib/order-database";
-import { getMainPlanPrice, getPromotionPriceForPlan, resolvePlanPricing } from "@/lib/pricing";
+import { resolvePlanPricing } from "@/lib/pricing";
 import { getActivePromotion } from "@/lib/promotion-database";
-import { validatePromoCodeForPlan } from "@/lib/site-settings";
+import { getOrderPricingFields } from "@/lib/order-pricing";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -112,21 +112,11 @@ export async function POST(request: NextRequest) {
     const canvaEmail = String(body.canvaEmail || "").trim().toLowerCase();
     const customerPhone = String(body.customerPhone || "").trim();
     const selectedPlan = String(body.selectedPlan || "").trim();
-    const planPrice = String(body.planPrice || "").trim();
     const paymentDetails = String(body.paymentDetails || "").trim();
     const selectedPlanKey = String(selectedPlan || "").trim().toLowerCase();
     const enteredPromoCode = String(body.promoCode || body.promo || "").trim();
     const priceState = await resolvePlanPricing(selectedPlanKey, enteredPromoCode || undefined);
-    const verifiedPlanPrice = Number(priceState.finalPrice || 0) || 0;
-    const mainPrice = getMainPlanPrice(selectedPlanKey) || Number(planPrice || 0) || 0;
     const activePromotion = await getActivePromotion();
-    const promotionOffer = activePromotion ? getPromotionPriceForPlan(selectedPlanKey, activePromotion) : null;
-    const promoValidation = enteredPromoCode ? await validatePromoCodeForPlan(enteredPromoCode, selectedPlanKey, mainPrice) : null;
-    const discountSource = String(priceState.priceSource || "main");
-    const promotionDiscountAmount = promotionOffer && promotionOffer.hasActivePromotion ? Math.max(0, mainPrice - promotionOffer.promotionPrice) : 0;
-    const promotionDiscountPercentage = promotionOffer && promotionOffer.hasActivePromotion && mainPrice > 0 ? Math.round((promotionDiscountAmount / mainPrice) * 100) : 0;
-    const promoDiscountAmount = promoValidation?.valid ? Number(promoValidation.discount || 0) : 0;
-    const promoDiscountPercentage = promoValidation?.valid && mainPrice > 0 ? Math.round((promoDiscountAmount / mainPrice) * 100) : 0;
     const orderDateValue = new Date();
     const serverDateTime = getDateTimeInTimezone(orderDateValue);
     const orderDate = String(body.orderDate || orderDateValue.toISOString()).trim();
@@ -232,12 +222,6 @@ export async function POST(request: NextRequest) {
     activationDeadline.setHours(activationDeadline.getHours() + 24);
 
     // Create stored order object
-    const discountType =
-      discountSource === "promotion" ? "PROMOTION" :
-      discountSource === "promo-code" ? "PROMO_CODE" :
-      discountSource === "stacked" ? "PROMOTION + PROMO_CODE" :
-      "NONE";
-
     let storedOrder: StoredOrder = {
       orderId,
           requestId,
@@ -262,18 +246,9 @@ export async function POST(request: NextRequest) {
       expiryTime: requestExpiryDateTime.time,
       planType: requestPlanType === "YEARLY" ? "YEARLY" : requestPlanType || undefined,
       duration: requestPlanType ? getPlanDurationDisplay(requestPlanType) : undefined,
-      mainPrice: mainPrice || Number(planPrice || 0) || 0,
       promotionName: activePromotion?.name || undefined,
       promotionId: activePromotion?.id || undefined,
-      promotionPrice: promotionOffer && promotionOffer.hasActivePromotion ? promotionOffer.promotionPrice : undefined,
-      promotionDiscountPercentage: promotionDiscountPercentage || undefined,
-      promotionDiscountAmount: promotionDiscountAmount || undefined,
-      promoCode: enteredPromoCode && promoValidation?.valid ? enteredPromoCode.toUpperCase() : undefined,
-      discountType,
-      discountPercentage: discountType === "NONE" ? 0 : (discountType === "PROMOTION" ? promotionDiscountPercentage : discountType === "PROMO_CODE" ? promoDiscountPercentage : Math.max(promotionDiscountPercentage, promoDiscountPercentage)),
-      discountAmount: discountType === "NONE" ? 0 : (discountType === "PROMOTION" ? promotionDiscountAmount : discountType === "PROMO_CODE" ? promoDiscountAmount : Math.max(promotionDiscountAmount, promoDiscountAmount)),
-      finalPrice: verifiedPlanPrice,
-      planPrice: String(verifiedPlanPrice),
+      ...getOrderPricingFields(priceState),
     };
 
     if (isTrial) {
@@ -288,14 +263,12 @@ export async function POST(request: NextRequest) {
       // Paid order-specific fields
       storedOrder.customerPhone = customerPhone;
       storedOrder.selectedPlan = selectedPlan;
-      storedOrder.planPrice = String(verifiedPlanPrice);
       storedOrder.paymentDetails = paymentDetails;
       storedOrder.additionalInfo = additionalInfo;
       storedOrder.receiptFilename = finalReceiptName;
       storedOrder.receiptPath = receiptPath;
-      storedOrder.storageKey = finalReceiptName;      storedOrder.mainPrice = mainPrice || Number(planPrice || 0) || 0;
-      storedOrder.finalPrice = verifiedPlanPrice;
-      storedOrder.planPrice = String(verifiedPlanPrice);    }
+      storedOrder.storageKey = finalReceiptName;
+    }
 
     let persistedSubmission;
     try {

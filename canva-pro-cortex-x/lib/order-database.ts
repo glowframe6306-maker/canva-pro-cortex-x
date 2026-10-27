@@ -44,6 +44,7 @@ export interface StoredOrder {
   promotionDiscountPercentage?: number;
   promotionDiscountAmount?: number;
   promoCode?: string;
+  promoDiscountAmount?: number;
   discountType?: "NONE" | "PROMOTION" | "PROMO_CODE" | "PROMOTION + PROMO_CODE";
   discountPercentage?: number;
   discountAmount?: number;

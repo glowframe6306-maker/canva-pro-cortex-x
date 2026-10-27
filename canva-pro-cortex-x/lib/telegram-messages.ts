@@ -206,18 +206,17 @@ export function buildNewOrderMessage(order: StoredOrder): string {
   finalLines.push(`Main Price: ${formatCurrency(order.mainPrice || order.planPrice || 0)}`);
   if (order.discountType === "PROMOTION" || order.discountType === "PROMOTION + PROMO_CODE") {
     finalLines.push(`Promotion Price: ${formatCurrency(order.promotionPrice || order.finalPrice || order.mainPrice || 0)}`);
-    finalLines.push(`Discount: ${Number(order.discountPercentage || 0) > 0 ? `${Number(order.discountPercentage || 0)}% OFF` : "0% OFF"}`);
-    finalLines.push(`You Saved: ${formatCurrency(order.discountAmount || 0)}`);
+    finalLines.push(`Promotion Discount Amount: ${formatCurrency(order.promotionDiscountAmount || 0)}`);
   }
   if (order.discountType === "PROMO_CODE" || order.discountType === "PROMOTION + PROMO_CODE") {
     finalLines.push(`Promo Code: ${order.promoCode || "PROMO"}`);
-    finalLines.push(`Promo Discount: ${Number(order.discountPercentage || 0) > 0 ? `${Number(order.discountPercentage || 0)}% OFF` : "0% OFF"}`);
-    finalLines.push(`Discount Amount: ${formatCurrency(order.discountAmount || 0)}`);
+    finalLines.push(`Promo Discount Amount: ${formatCurrency(order.promoDiscountAmount || 0)}`);
   }
   if (order.discountType === "NONE") {
     finalLines.push("Discount: LKR 0");
   }
-  finalLines.push(`Final Price: ${formatCurrency(order.finalPrice || order.planPrice || 0)}`);
+  finalLines.push(`Total Discount Amount: ${formatCurrency(order.discountAmount || 0)}`);
+  finalLines.push(`Final Payable Price: ${formatCurrency(order.finalPrice ?? order.planPrice ?? 0)}`);
   finalLines.push("", "━━━━━━━━━━━━━━━━━━", "👤 CUSTOMER DETAILS", "━━━━━━━━━━━━━━━━━━", "");
   finalLines.push(`Name: ${customerName}`);
   finalLines.push(`Email: ${customerEmail}`);

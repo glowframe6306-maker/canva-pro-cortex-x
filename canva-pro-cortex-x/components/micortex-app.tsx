@@ -571,6 +571,7 @@ export default function MicortexAppPremium() {
         orderForm.canvaEmail,
         orderForm.remarks,
         planDetail?.id,
+        customerPromo?.code,
         paymentForm.referenceNumber,
         paymentForm.receiptFile.name,
         paymentForm.receiptFile.size,
@@ -584,6 +585,7 @@ export default function MicortexAppPremium() {
       formData.append("canvaEmail", orderForm.canvaEmail);
       formData.append("selectedPlan", planDetail?.id || "");
       formData.append("planPrice", String(getEffectivePlanPrice(planDetail?.id || "", planDetail?.price || 0)));
+      formData.append("promoCode", customerPromo?.code || "");
       formData.append("paymentMethod", "Bank Transfer");
       formData.append("paymentDetails", paymentForm.referenceNumber);
       formData.append("orderDate", new Date().toISOString());
