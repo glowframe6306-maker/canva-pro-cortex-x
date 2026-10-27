@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
       storedOrder = persistedSubmission.persisted.order;
     }
 
-    if (!isTrial && storedOrder.promoCode) {
+    if (!isTrial && storedOrder.promoCode && storedOrder.promoCodeApplied) {
       await incrementPromoUsage(
         storedOrder.promoCode,
         storedOrder.orderId,

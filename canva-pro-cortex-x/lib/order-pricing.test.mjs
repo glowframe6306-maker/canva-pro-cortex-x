@@ -249,10 +249,60 @@ test("promotion precedence omits a valid code when the promotion remains the cho
   const order = telegramOrder(state, { promotionName: "Seasonal" });
   const message = buildNewOrderMessage(order);
 
-  assert.equal(order.promoCode, undefined);
+  assert.equal(order.promoCode, "SAVE5");
+  assert.equal(order.promoCodeApplied, false);
   assert.equal(order.discountType, "PROMOTION");
+  assert.match(message, /Promotion: Seasonal/);
+  assert.match(message, /Promo Code: SAVE5 \(not applied; promotion price selected\)/);
   assert.match(message, /Final Payable Price: LKR 800/);
-  assert.doesNotMatch(message, /Promo Code: SAVE5/);
+});
+
+test("valid promo entry does not hide an active promotion when the promo code wins precedence", async () => {
+  const activeOffer = { price: 900, name: "Seasonal" };
+  const withoutCode = await resolvePricing({ promotion: activeOffer }, undefined);
+  const withValidCode = await resolvePricing({
+    promotion: activeOffer,
+    validCode: "SAVE30",
+    promoDiscount: 150,
+  }, "SAVE30");
+
+  assert.equal(withoutCode.promotionId, withValidCode.promotionId);
+  assert.equal(withoutCode.promotionPrice, 900);
+  assert.equal(withValidCode.promotionPrice, 900);
+  assert.equal(withValidCode.priceSource, "promo-code");
+
+  const order = telegramOrder(withValidCode);
+  const message = buildNewOrderMessage(order);
+  assert.equal(order.promotionApplied, false);
+  assert.equal(order.promoCodeApplied, true);
+  assert.equal(order.promotionDiscountAmount, 100);
+  assert.equal(order.promoDiscountAmount, 150);
+  assert.equal(order.discountAmount, 150);
+  assert.equal(order.finalPrice, 850);
+  assert.match(message, /Promotion: Seasonal \(not applied; promo code price selected\)/);
+  assert.match(message, /Promotion Discount Amount: LKR 100 \(not applied\)/);
+  assert.match(message, /Promo Code: SAVE30/);
+  assert.match(message, /Promo Code Discount Amount: LKR 150/);
+  assert.match(message, /Total Discount Amount: LKR 150/);
+  assert.match(message, /Final Payable Price: LKR 850/);
+});
+
+test("invalid promo entry leaves the same active promotion applied", async () => {
+  const activeOffer = { price: 900, name: "Seasonal" };
+  const withoutCode = await resolvePricing({ promotion: activeOffer }, undefined);
+  const withInvalidCode = await resolvePricing({ promotion: activeOffer }, "EXPIRED");
+
+  assert.equal(withInvalidCode.promotionId, withoutCode.promotionId);
+  assert.equal(withInvalidCode.priceSource, "promotion");
+  assert.equal(withInvalidCode.promoCode, null);
+  const order = telegramOrder(withInvalidCode);
+  const message = buildNewOrderMessage(order);
+  assert.equal(order.finalPrice, 900);
+  assert.equal(order.discountAmount, 100);
+  assert.match(message, /Promotion: Seasonal/);
+  assert.match(message, /Promotion Discount Amount: LKR 100/);
+  assert.match(message, /Promo Code: None/);
+  assert.match(message, /Final Payable Price: LKR 900/);
 });
 
 test("stacked promotion reports each validated discount and the final total", async () => {
@@ -266,6 +316,8 @@ test("stacked promotion reports each validated discount and the final total", as
   const message = buildNewOrderMessage(order);
 
   assert.equal(order.discountType, "PROMOTION + PROMO_CODE");
+  assert.equal(order.promotionApplied, true);
+  assert.equal(order.promoCodeApplied, true);
   assert.equal(order.discountAmount, 200);
   assert.match(message, /Promotion Discount Amount: LKR 100/);
   assert.match(message, /Promo Code Discount Amount: LKR 100/);
@@ -284,7 +336,7 @@ test("a better promo code wins when stacking is prohibited", async () => {
 
   assert.equal(order.discountType, "PROMO_CODE");
   assert.equal(order.finalPrice, 800);
-  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promotion: Seasonal \(not applied; promo code price selected\)/);
   assert.match(message, /Promo Code: SAVE20/);
   assert.match(message, /Total Discount Amount: LKR 200/);
 });

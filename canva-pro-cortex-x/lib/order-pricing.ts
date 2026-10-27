@@ -7,15 +7,17 @@ export function getOrderPricingFields(pricing: PricingState): Pick<
   | "promotionPrice"
   | "promotionDiscountPercentage"
   | "promotionDiscountAmount"
+  | "promotionApplied"
   | "promoCode"
+  | "promoCodeOfferDiscountAmount"
   | "promoDiscountAmount"
+  | "promoCodeApplied"
   | "discountType"
   | "discountPercentage"
   | "discountAmount"
   | "finalPrice"
   | "planPrice"
 > {
-  const promoWasApplied = pricing.priceSource === "promo-code" || pricing.priceSource === "stacked";
   const totalDiscount = Math.max(0, pricing.mainPrice - pricing.finalPrice);
   const discountType = {
     main: "NONE",
@@ -31,8 +33,11 @@ export function getOrderPricingFields(pricing: PricingState): Pick<
       ? Math.round((pricing.promotionDiscount / pricing.mainPrice) * 100)
       : undefined,
     promotionDiscountAmount: pricing.hasActivePromotion ? pricing.promotionDiscount : undefined,
-    promoCode: promoWasApplied ? pricing.promoCode?.toUpperCase() : undefined,
-    promoDiscountAmount: promoWasApplied ? pricing.promoDiscount : undefined,
+    promotionApplied: pricing.promotionApplied,
+    promoCode: pricing.promoCode?.toUpperCase() || undefined,
+    promoCodeOfferDiscountAmount: pricing.promoCode ? pricing.promoDiscount : undefined,
+    promoDiscountAmount: pricing.promoCodeApplied ? pricing.appliedPromoDiscount : undefined,
+    promoCodeApplied: pricing.promoCodeApplied,
     discountType,
     discountPercentage: pricing.mainPrice > 0 ? Math.round((totalDiscount / pricing.mainPrice) * 100) : 0,
     discountAmount: totalDiscount,
@@ -49,8 +54,8 @@ function formatCurrency(amount: number | string | undefined) {
 export function getOrderPricingLines(order: StoredOrder): string[] {
   const mainPrice = Number(order.mainPrice ?? order.planPrice ?? 0);
   const finalPrice = Number(order.finalPrice ?? order.planPrice ?? mainPrice);
-  const hasPromotion = order.discountType === "PROMOTION" || order.discountType === "PROMOTION + PROMO_CODE";
-  const hasPromoCode = order.discountType === "PROMO_CODE" || order.discountType === "PROMOTION + PROMO_CODE";
+  const hasPromotion = order.promotionPrice !== undefined && order.promotionDiscountAmount !== undefined;
+  const hasPromoCode = Boolean(order.promoCode);
   const totalDiscount = Math.max(0, mainPrice - finalPrice);
 
   return [
@@ -61,10 +66,10 @@ export function getOrderPricingLines(order: StoredOrder): string[] {
     "",
     `Plan/Product: ${order.selectedPlan}`,
     `Original Price: ${formatCurrency(mainPrice)}`,
-    `Promotion: ${hasPromotion ? order.promotionName || "Promotion" : "None"}`,
-    `Promotion Discount Amount: ${formatCurrency(hasPromotion ? order.promotionDiscountAmount : 0)}`,
-    `Promo Code: ${hasPromoCode ? order.promoCode || "PROMO" : "None"}`,
-    `Promo Code Discount Amount: ${formatCurrency(hasPromoCode ? order.promoDiscountAmount : 0)}`,
+    `Promotion: ${hasPromotion ? `${order.promotionName || "Promotion"}${order.promotionApplied === false ? " (not applied; promo code price selected)" : ""}` : "None"}`,
+    `Promotion Discount Amount: ${formatCurrency(hasPromotion ? order.promotionDiscountAmount : 0)}${hasPromotion && order.promotionApplied === false ? " (not applied)" : ""}`,
+    `Promo Code: ${hasPromoCode ? `${order.promoCode || "PROMO"}${order.promoCodeApplied === false ? " (not applied; promotion price selected)" : ""}` : "None"}`,
+    `Promo Code Discount Amount: ${formatCurrency(hasPromoCode ? order.promoCodeApplied === false ? order.promoCodeOfferDiscountAmount : order.promoDiscountAmount : 0)}${hasPromoCode && order.promoCodeApplied === false ? " (not applied)" : ""}`,
     `Total Discount Amount: ${formatCurrency(totalDiscount)}`,
     `Final Payable Price: ${formatCurrency(finalPrice)}`,
     "Currency: LKR",
