@@ -4,11 +4,16 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { validateCustomerDetails } from "./customer-details.ts";
+import {
+  validateCustomerDetails,
+  validateCustomerDetailsAndContinue,
+} from "./customer-details.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routePath = path.join(root, "app", "api", "orders", "route.ts");
+const clientPath = path.join(root, "components", "micortex-app.tsx");
 const routeSource = await readFile(routePath, "utf8");
+const clientSource = await readFile(clientPath, "utf8");
 
 const validInput = {
   fullName: "  Buyer Name  ",
@@ -79,4 +84,59 @@ test("server validates customer details before idempotency lookup or order persi
   assert.match(routeSource, /customerEmail = customerDetails\.email/);
   assert.match(routeSource, /customerPhone = customerDetails\.whatsapp/);
   assert.match(routeSource, /fieldErrors: customerDetails\.errors/);
+});
+
+test("invalid customer details block checkout continuation", () => {
+  let continued = false;
+  const result = validateCustomerDetailsAndContinue(
+    { ...validInput, email: "not-an-email" },
+    () => {
+      continued = true;
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.email, "Please enter a valid email address.");
+  assert.equal(continued, false);
+});
+
+test("valid details normalize before allowing checkout continuation", () => {
+  let continuedWith;
+  const result = validateCustomerDetailsAndContinue(validInput, (details) => {
+    continuedWith = details;
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(continuedWith, {
+    ok: true,
+    fullName: "Buyer Name",
+    email: "buyer@example.test",
+    whatsapp: "+94771234567",
+  });
+});
+
+test("revalidating after correcting invalid details allows continuation", () => {
+  let continued = false;
+  const firstAttempt = validateCustomerDetailsAndContinue(
+    { ...validInput, whatsapp: "123" },
+    () => {
+      continued = true;
+    },
+  );
+  assert.equal(firstAttempt.ok, false);
+  assert.equal(continued, false);
+
+  const secondAttempt = validateCustomerDetailsAndContinue(validInput, () => {
+    continued = true;
+  });
+  assert.equal(secondAttempt.ok, true);
+  assert.equal(continued, true);
+});
+
+test("details NEXT button and Enter key use the same validated navigation handler", () => {
+  assert.match(clientSource, /onClick=\{handleCustomerDetailsNext\}/);
+  assert.match(clientSource, /event\.key === "Enter" && event\.target instanceof HTMLInputElement/);
+  assert.match(clientSource, /event\.preventDefault\(\);\s*handleCustomerDetailsNext\(\);/);
+  assert.match(clientSource, /validateCustomerDetailsAndContinue\(orderForm/);
+  assert.match(clientSource, /setStep\("payment"\)/);
 });

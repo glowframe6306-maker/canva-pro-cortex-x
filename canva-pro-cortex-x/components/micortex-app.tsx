@@ -15,7 +15,11 @@ import {
 } from "@/components/site-feature-widgets";
 import { PromotionCountdown } from "@/components/promotion-countdown";
 import { calculateCheckoutPlanPrice } from "@/lib/pricing-calculation";
-import { validateCustomerDetails, type CustomerDetailsErrors } from "@/lib/customer-details";
+import {
+  validateCustomerDetails,
+  validateCustomerDetailsAndContinue,
+  type CustomerDetailsErrors,
+} from "@/lib/customer-details";
 
 type OrderForm = {
   fullName: string;
@@ -640,6 +644,31 @@ export default function MicortexAppPremium() {
       setMessage("Unable to submit order right now. Please try again.");
       setLoading(false);
     }
+  };
+
+  const updateCustomerDetail = (field: keyof CustomerDetailsErrors, value: string) => {
+    const updatedForm = { ...orderForm, [field]: value };
+    setOrderForm(updatedForm);
+    const validation = validateCustomerDetails(updatedForm);
+    setCustomerDetailErrors((errors) => ({
+      ...errors,
+      [field]: validation.ok ? undefined : validation.errors[field],
+    }));
+  };
+
+  const handleCustomerDetailsNext = () => {
+    const validation = validateCustomerDetailsAndContinue(orderForm, (details) => {
+      setOrderForm((current) => ({
+        ...current,
+        fullName: details.fullName,
+        email: details.email,
+        whatsapp: details.whatsapp,
+      }));
+      setMessage("");
+      setStep("payment");
+    });
+    setCustomerDetailErrors(validation.ok ? {} : validation.errors);
+    if (!validation.ok) setMessage("");
   };
 
   const handleTrialSubmit = async () => {
@@ -1879,7 +1908,15 @@ export default function MicortexAppPremium() {
 
         {/* DETAILS FORM */}
         {step === "details" && !discardConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-md overflow-y-auto">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-md overflow-y-auto"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
+                event.preventDefault();
+                handleCustomerDetailsNext();
+              }
+            }}
+          >
             <div className="w-full max-w-2xl my-8 animate-in zoom-in duration-300">
               <div className="rounded-3xl border border-cyan-400/30 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-8 shadow-2xl backdrop-blur-2xl relative">
                 {/* Close Button */}
@@ -1923,10 +1960,7 @@ export default function MicortexAppPremium() {
                       aria-invalid={Boolean(customerDetailErrors.fullName)}
                       aria-describedby={customerDetailErrors.fullName ? "order-full-name-error" : undefined}
                       value={orderForm.fullName}
-                      onChange={(e) => {
-                        setOrderForm({ ...orderForm, fullName: e.target.value });
-                        setCustomerDetailErrors((errors) => ({ ...errors, fullName: undefined }));
-                      }}
+                      onChange={(e) => updateCustomerDetail("fullName", e.target.value)}
                       className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
                     />
                     {customerDetailErrors.fullName && <p id="order-full-name-error" className="mt-1 text-sm text-red-300">{customerDetailErrors.fullName}</p>}
@@ -1939,10 +1973,7 @@ export default function MicortexAppPremium() {
                       aria-invalid={Boolean(customerDetailErrors.email)}
                       aria-describedby={customerDetailErrors.email ? "order-email-error" : undefined}
                       value={orderForm.email}
-                      onChange={(e) => {
-                        setOrderForm({ ...orderForm, email: e.target.value });
-                        setCustomerDetailErrors((errors) => ({ ...errors, email: undefined }));
-                      }}
+                      onChange={(e) => updateCustomerDetail("email", e.target.value)}
                       className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
                     />
                     {customerDetailErrors.email && <p id="order-email-error" className="mt-1 text-sm text-red-300">{customerDetailErrors.email}</p>}
@@ -1955,10 +1986,7 @@ export default function MicortexAppPremium() {
                       aria-invalid={Boolean(customerDetailErrors.whatsapp)}
                       aria-describedby={customerDetailErrors.whatsapp ? "order-whatsapp-error" : undefined}
                       value={orderForm.whatsapp}
-                      onChange={(e) => {
-                        setOrderForm({ ...orderForm, whatsapp: e.target.value });
-                        setCustomerDetailErrors((errors) => ({ ...errors, whatsapp: undefined }));
-                      }}
+                      onChange={(e) => updateCustomerDetail("whatsapp", e.target.value)}
                       className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
                     />
                     {customerDetailErrors.whatsapp && <p id="order-whatsapp-error" className="mt-1 text-sm text-red-300">{customerDetailErrors.whatsapp}</p>}
@@ -1999,10 +2027,7 @@ export default function MicortexAppPremium() {
                     CANCEL
                   </button>
                   <button
-                    onClick={() => {
-                      setMessage("");
-                      setStep("payment");
-                    }}
+                    onClick={handleCustomerDetailsNext}
                     className="flex-1 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-3 font-bold text-white shadow-lg hover:shadow-2xl hover:scale-105 transition-all"
                   >
                     NEXT →

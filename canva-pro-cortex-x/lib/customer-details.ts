@@ -112,3 +112,12 @@ export function validateCustomerDetails(input: CustomerDetailsInput): ValidCusto
   if (Object.keys(errors).length > 0 || !whatsapp) return { ok: false, errors };
   return { ok: true, fullName, email, whatsapp };
 }
+
+export function validateCustomerDetailsAndContinue(
+  input: CustomerDetailsInput,
+  onContinue: (details: ValidCustomerDetails) => void,
+): ValidCustomerDetails | InvalidCustomerDetails {
+  const result = validateCustomerDetails(input);
+  if (result.ok) onContinue(result);
+  return result;
+}
