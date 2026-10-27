@@ -17,7 +17,7 @@ export function getPromotionPriceForPlan(planId: string, promotion: any = null) 
   const mainPrice = getMainPlanPrice(planId);
   const offer = promotion ? getPromotionOfferForPlan(promotion, planId) : null;
 
-  if (!offer || !offer.promotionalPrice || offer.promotionalPrice >= mainPrice) {
+  if (!offer || offer.promotionalPrice >= mainPrice) {
     return {
       hasActivePromotion: false,
       promotionPrice: mainPrice,
@@ -35,7 +35,7 @@ export function getPromotionPriceForPlan(planId: string, promotion: any = null) 
 export async function resolvePlanPricing(planId: string, enteredPromoCode?: string): Promise<PricingState> {
   const planKey = String(planId || "").trim();
   const mainPrice = getMainPlanPrice(planKey);
-  const promotion = await getActivePromotion();
+  const promotion = await getActivePromotion(planKey);
   const promotionResult = getPromotionPriceForPlan(planKey, promotion);
   const settings = await getSiteSettings();
   const discountStacking = Boolean(settings.discountStacking);

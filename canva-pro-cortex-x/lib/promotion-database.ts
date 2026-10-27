@@ -313,11 +313,12 @@ async function writePromotions(promotions: Promotion[]): Promise<void> {
   await saveApplicationSetting("promotions", promotions);
 }
 
-export async function getActivePromotion(): Promise<Promotion | null> {
+export async function getActivePromotion(planId?: string): Promise<Promotion | null> {
   const promotions = await readPromotions();
 
   for (const promo of promotions) {
     if (!isPromotionActive(promo)) continue;
+    if (planId && !getPromotionOfferForPlan(promo, planId)?.isDiscounted) continue;
     return promo;
   }
 

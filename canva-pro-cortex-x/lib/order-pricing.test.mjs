@@ -9,6 +9,10 @@ import { getOrderPricingFields } from "./order-pricing.ts";
 import { getOrderPricingLines } from "./order-pricing.ts";
 import { calculatePlanPricing } from "./pricing-calculation.ts";
 import { validatePromoCodeForPlanInList } from "./promo-code-utils.ts";
+import {
+  InvalidApplicationSettingError,
+  MissingApplicationSettingError,
+} from "./application-settings-values.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routePath = path.join(root, "app", "api", "orders", "route.ts");
@@ -44,20 +48,45 @@ function loadTelegramMessages() {
 }
 
 const pricingSource = await readFile(path.join(root, "lib", "pricing.ts"), "utf8");
+const promotionDatabaseSource = await readFile(path.join(root, "lib", "promotion-database.ts"), "utf8");
 let pricingScenario = {};
+let configuredPromotions = [];
+const promotionDatabaseCompiled = ts.transpileModule(promotionDatabaseSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const promotionDatabaseModule = { exports: {} };
+const basePlans = [
+  { id: "weekly", price: 200 },
+  { id: "monthly", price: 1000 },
+  { id: "annually", price: 2000 },
+  { id: "lifetime", price: 5000 },
+];
+new Function("require", "module", "exports", promotionDatabaseCompiled)(
+  (name) => {
+    if (name === "@/components/site-data") return { plans: basePlans };
+    if (name === "@/lib/application-settings-store") {
+      return {
+        getApplicationSetting: async () => {
+          if (configuredPromotions === undefined) throw new MissingApplicationSettingError("promotions");
+          return configuredPromotions;
+        },
+        saveApplicationSetting: async () => {},
+      };
+    }
+    if (name === "@/lib/application-settings-values") return { InvalidApplicationSettingError };
+    throw new Error(`Unexpected dependency in promotion database test: ${name}`);
+  },
+  promotionDatabaseModule,
+  promotionDatabaseModule.exports,
+);
+const { getActivePromotion, getPromotionOfferForPlan } = promotionDatabaseModule.exports;
 const pricingCompiled = ts.transpileModule(pricingSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const pricingModule = { exports: {} };
 const pricingMocks = {
-  "@/components/site-data": { plans: [{ id: "monthly", price: 1000 }] },
-  "@/lib/promotion-database": {
-    getActivePromotion: async () => pricingScenario.promotion || null,
-    getPromotionOfferForPlan: (promotion) => ({
-      promotionalPrice: promotion.price,
-      discountAmount: 1000 - promotion.price,
-    }),
-  },
+  "@/components/site-data": { plans: basePlans },
+  "@/lib/promotion-database": { getActivePromotion, getPromotionOfferForPlan },
   "@/lib/site-settings": {
     getSiteSettings: async () => ({ discountStacking: Boolean(pricingScenario.discountStacking) }),
     normalizePromoCode: (code) => String(code || "").trim().replace(/\s+/g, "").toUpperCase(),
@@ -88,13 +117,38 @@ const { buildNewOrderMessage } = loadTelegramMessages();
 
 async function resolvePricing(scenario, code) {
   pricingScenario = scenario;
+  if (Object.hasOwn(scenario, "promotions")) {
+    configuredPromotions = scenario.promotions;
+  } else if (scenario.promotion) {
+    configuredPromotions = [makePromotion(scenario.promotion)];
+  } else {
+    configuredPromotions = [];
+  }
   return resolvePlanPricing("monthly", code);
+}
+
+function makePromotion({ price, applicablePlans = ["monthly"], id = "test-promotion", name = "Test Promotion" }) {
+  return {
+    id,
+    enabled: true,
+    name,
+    title: name,
+    applicablePlans,
+    planPrices: {
+      weekly: { promotionalPrice: 200, enabled: true },
+      monthly: { promotionalPrice: price, enabled: true },
+      annually: { promotionalPrice: 2000, enabled: true },
+      lifetime: { promotionalPrice: 5000, enabled: true },
+    },
+  };
 }
 
 function telegramOrder(pricingState, overrides = {}) {
   return {
     orderId: "ORDER-TEST",
     selectedPlan: "monthly",
+    promotionName: pricingState.promotionName,
+    promotionId: pricingState.promotionId,
     customerName: "Test Buyer",
     customerEmail: "buyer@example.test",
     customerPhone: "000",
@@ -161,6 +215,22 @@ test("promotion-only pricing keeps its existing precedence and total", async () 
   assert.match(message, /Promotion Discount Amount: LKR 150/);
   assert.match(message, /Promo Code: None/);
   assert.match(message, /Final Payable Price: LKR 850/);
+});
+
+test("active zero-price promotion is not mistaken for a missing promotion", async () => {
+  const state = await resolvePricing({
+    promotions: [makePromotion({ price: 0, name: "Full Discount" })],
+  }, undefined);
+  const order = telegramOrder(state, { promotionName: "Full Discount" });
+  const message = buildNewOrderMessage(order);
+
+  assert.equal(order.discountType, "PROMOTION");
+  assert.equal(order.promotionPrice, 0);
+  assert.equal(order.promotionDiscountAmount, 1000);
+  assert.equal(order.finalPrice, 0);
+  assert.match(message, /Promotion: Full Discount/);
+  assert.match(message, /Promotion Discount Amount: LKR 1,000/);
+  assert.match(message, /Final Payable Price: LKR 0/);
 });
 
 test("promotion precedence omits a valid code when the promotion remains the chosen price", async () => {
@@ -236,6 +306,40 @@ test("expired and usage-limited promo codes cannot apply a discount", () => {
   assert.equal(expired.valid, false);
   assert.equal(expired.discount, 0);
   assert.equal(exhausted.valid, false);
+});
+
+test("missing and invalid promotion settings fail order pricing instead of being treated as absent", async () => {
+  await assert.rejects(
+    () => resolvePricing({ promotions: undefined }, undefined),
+    MissingApplicationSettingError,
+  );
+  await assert.rejects(
+    () => resolvePricing({ promotions: [{ invalid: true }] }, undefined),
+    InvalidApplicationSettingError,
+  );
+});
+
+test("the selected plan's promotion is found even when an earlier active promotion excludes it", async () => {
+  const weeklyPromotion = makePromotion({
+    id: "weekly-offer",
+    name: "Weekly Offer",
+    price: 150,
+    applicablePlans: ["weekly"],
+  });
+  const monthlyPromotion = makePromotion({
+    id: "monthly-offer",
+    name: "Monthly Offer",
+    price: 800,
+    applicablePlans: ["monthly"],
+  });
+  const state = await resolvePricing({ promotions: [weeklyPromotion, monthlyPromotion] }, undefined);
+  const order = telegramOrder(state);
+  const message = buildNewOrderMessage(order);
+
+  assert.equal(state.promotionId, "monthly-offer");
+  assert.equal(order.finalPrice, 800);
+  assert.match(message, /Promotion: Monthly Offer/);
+  assert.match(message, /Final Payable Price: LKR 800/);
 });
 
 test("notification pricing details match persisted server-computed order fields", async () => {
