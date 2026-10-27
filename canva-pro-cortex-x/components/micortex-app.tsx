@@ -15,6 +15,7 @@ import {
 } from "@/components/site-feature-widgets";
 import { PromotionCountdown } from "@/components/promotion-countdown";
 import { calculateCheckoutPlanPrice } from "@/lib/pricing-calculation";
+import { validateCustomerDetails, type CustomerDetailsErrors } from "@/lib/customer-details";
 
 type OrderForm = {
   fullName: string;
@@ -173,6 +174,7 @@ export default function MicortexAppPremium() {
   const [step, setStep] = useState<"home" | "confirm" | "details" | "payment" | "review" | "success" | "trial">("home");
   const [selectedPlan, setSelectedPlan] = useState<(typeof planCards)[0] | null>(null);
   const [orderForm, setOrderForm] = useState<OrderForm>({ fullName: "", email: "", whatsapp: "", canvaEmail: "", remarks: "" });
+  const [customerDetailErrors, setCustomerDetailErrors] = useState<CustomerDetailsErrors>({});
   const [paymentForm, setPaymentForm] = useState<PaymentForm>({ referenceNumber: "", receiptFile: null });
   const [trialForm, setTrialForm] = useState<TrialForm>({ fullName: "", email: "", whatsapp: "", canvaEmail: "" });
   const [loading, setLoading] = useState(false);
@@ -426,6 +428,7 @@ export default function MicortexAppPremium() {
     setStep("home");
     setSelectedPlan(null);
     setOrderForm({ fullName: "", email: "", whatsapp: "", canvaEmail: "", remarks: "" });
+    setCustomerDetailErrors({});
     setPaymentForm({ referenceNumber: "", receiptFile: null });
     setTrialForm({ fullName: "", email: "", whatsapp: "", canvaEmail: "" });
     setLoading(false);
@@ -455,6 +458,7 @@ export default function MicortexAppPremium() {
     setStep("home");
     setSelectedPlan(null);
     setOrderForm({ fullName: "", email: "", whatsapp: "", canvaEmail: "", remarks: "" });
+    setCustomerDetailErrors({});
     setPaymentForm({ referenceNumber: "", receiptFile: null });
     setTrialForm({ fullName: "", email: "", whatsapp: "", canvaEmail: "" });
     setMessage("");
@@ -557,7 +561,17 @@ export default function MicortexAppPremium() {
   };
 
   const handleOrderSubmit = async () => {
-    if (!orderForm.fullName || !orderForm.email || !orderForm.whatsapp || !orderForm.canvaEmail) {
+    const customerDetails = validateCustomerDetails({
+      fullName: orderForm.fullName,
+      email: orderForm.email,
+      whatsapp: orderForm.whatsapp,
+    });
+    setCustomerDetailErrors(customerDetails.ok ? {} : customerDetails.errors);
+    if (!customerDetails.ok) {
+      setMessage("Please correct your customer details.");
+      return;
+    }
+    if (!orderForm.canvaEmail.trim()) {
       setMessage("Please fill in all required fields.");
       return;
     }
@@ -571,9 +585,9 @@ export default function MicortexAppPremium() {
 
     try {
       const fingerprint = JSON.stringify([
-        orderForm.fullName,
-        orderForm.email,
-        orderForm.whatsapp,
+        customerDetails.fullName,
+        customerDetails.email,
+        customerDetails.whatsapp,
         orderForm.canvaEmail,
         orderForm.remarks,
         planDetail?.id,
@@ -585,9 +599,9 @@ export default function MicortexAppPremium() {
       ]);
       const idempotencyKey = await getSubmissionKey("order", fingerprint);
       const formData = new FormData();
-      formData.append("customerName", orderForm.fullName);
-      formData.append("customerPhone", orderForm.whatsapp);
-      formData.append("customerEmail", orderForm.email);
+      formData.append("customerName", customerDetails.fullName);
+      formData.append("customerPhone", customerDetails.whatsapp);
+      formData.append("customerEmail", customerDetails.email);
       formData.append("canvaEmail", orderForm.canvaEmail);
       formData.append("selectedPlan", planDetail?.id || "");
       formData.append("planPrice", String(getEffectivePlanPrice(planDetail?.id || "", planDetail?.price || 0)));
@@ -794,6 +808,7 @@ export default function MicortexAppPremium() {
     setStep("home");
     setSelectedPlan(null);
     setOrderForm({ fullName: "", email: "", whatsapp: "", canvaEmail: "", remarks: "" });
+    setCustomerDetailErrors({});
     setPaymentForm({ referenceNumber: "", receiptFile: null });
     setTrialForm({ fullName: "", email: "", whatsapp: "", canvaEmail: "" });
     setSuccessState(null);
@@ -1900,27 +1915,54 @@ export default function MicortexAppPremium() {
                 </div>
 
                 <div className="space-y-4 mb-6">
-                  <input
-                    type="text"
-                    placeholder="Full Name"
-                    value={orderForm.fullName}
-                    onChange={(e) => setOrderForm({ ...orderForm, fullName: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email Address"
-                    value={orderForm.email}
-                    onChange={(e) => setOrderForm({ ...orderForm, email: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="WhatsApp Number"
-                    value={orderForm.whatsapp}
-                    onChange={(e) => setOrderForm({ ...orderForm, whatsapp: e.target.value })}
-                    className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
-                  />
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Full Name"
+                      required
+                      aria-invalid={Boolean(customerDetailErrors.fullName)}
+                      aria-describedby={customerDetailErrors.fullName ? "order-full-name-error" : undefined}
+                      value={orderForm.fullName}
+                      onChange={(e) => {
+                        setOrderForm({ ...orderForm, fullName: e.target.value });
+                        setCustomerDetailErrors((errors) => ({ ...errors, fullName: undefined }));
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
+                    />
+                    {customerDetailErrors.fullName && <p id="order-full-name-error" className="mt-1 text-sm text-red-300">{customerDetailErrors.fullName}</p>}
+                  </div>
+                  <div>
+                    <input
+                      type="email"
+                      placeholder="Email Address"
+                      required
+                      aria-invalid={Boolean(customerDetailErrors.email)}
+                      aria-describedby={customerDetailErrors.email ? "order-email-error" : undefined}
+                      value={orderForm.email}
+                      onChange={(e) => {
+                        setOrderForm({ ...orderForm, email: e.target.value });
+                        setCustomerDetailErrors((errors) => ({ ...errors, email: undefined }));
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
+                    />
+                    {customerDetailErrors.email && <p id="order-email-error" className="mt-1 text-sm text-red-300">{customerDetailErrors.email}</p>}
+                  </div>
+                  <div>
+                    <input
+                      type="tel"
+                      placeholder="WhatsApp Number"
+                      required
+                      aria-invalid={Boolean(customerDetailErrors.whatsapp)}
+                      aria-describedby={customerDetailErrors.whatsapp ? "order-whatsapp-error" : undefined}
+                      value={orderForm.whatsapp}
+                      onChange={(e) => {
+                        setOrderForm({ ...orderForm, whatsapp: e.target.value });
+                        setCustomerDetailErrors((errors) => ({ ...errors, whatsapp: undefined }));
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
+                    />
+                    {customerDetailErrors.whatsapp && <p id="order-whatsapp-error" className="mt-1 text-sm text-red-300">{customerDetailErrors.whatsapp}</p>}
+                  </div>
                   <input
                     type="email"
                     placeholder="Canva Email Address"

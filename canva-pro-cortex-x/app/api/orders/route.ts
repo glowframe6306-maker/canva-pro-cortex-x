@@ -29,6 +29,7 @@ import type { StoredOrder } from "@/lib/order-database";
 import { resolvePlanPricing } from "@/lib/pricing";
 import { getOrderPricingFields } from "@/lib/order-pricing";
 import { incrementPromoUsage } from "@/lib/site-settings";
+import { validateCustomerDetails } from "@/lib/customer-details";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -94,6 +95,22 @@ export async function POST(request: NextRequest) {
     const paymentMethod = String(body.paymentMethod || "").trim();
     const isTrial = paymentMethod === "Free Trial";
 
+    const customerDetails = validateCustomerDetails({
+      fullName: body.customerName,
+      email: body.customerEmail,
+      whatsapp: body.customerPhone,
+    });
+    if (!customerDetails.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Please correct your customer details.",
+          fieldErrors: customerDetails.errors,
+        },
+        { status: 400 },
+      );
+    }
+
     const missingFields = getMissingOrderFields(isTrial, body);
     if (missingFields.length > 0) {
       return NextResponse.json(
@@ -107,10 +124,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Please retry the order submission." }, { status: 400 });
     }
 
-    const customerName = String(body.customerName || "").trim();
-    const customerEmail = String(body.customerEmail || "").trim();
+    const customerName = customerDetails.fullName;
+    const customerEmail = customerDetails.email;
     const canvaEmail = String(body.canvaEmail || "").trim().toLowerCase();
-    const customerPhone = String(body.customerPhone || "").trim();
+    const customerPhone = customerDetails.whatsapp;
     const selectedPlan = String(body.selectedPlan || "").trim();
     const paymentDetails = String(body.paymentDetails || "").trim();
     const selectedPlanKey = String(selectedPlan || "").trim().toLowerCase();

@@ -9,6 +9,7 @@ import { getOrderPricingFields } from "./order-pricing.ts";
 import { getOrderPricingLines } from "./order-pricing.ts";
 import { calculateCheckoutPlanPrice, calculatePlanPricing } from "./pricing-calculation.ts";
 import { validatePromoCodeForPlanInList } from "./promo-code-utils.ts";
+import { validateCustomerDetails } from "./customer-details.ts";
 import {
   InvalidApplicationSettingError,
   MissingApplicationSettingError,
@@ -191,6 +192,29 @@ test("valid promo order message uses validated promo and final payable price", a
   assert.match(message, /Total Discount Amount: LKR 200/);
   assert.match(message, /Final Payable Price: LKR 800/);
   assert.match(message, /Currency: LKR/);
+});
+
+test("normalized customer details are saved to the order and included in Telegram formatting", async () => {
+  const details = validateCustomerDetails({
+    fullName: "  Buyer Name ",
+    email: " Buyer@Example.test ",
+    whatsapp: "077 123 4567",
+  });
+  assert.equal(details.ok, true);
+
+  const state = await resolvePricing({}, undefined);
+  const order = telegramOrder(state, {
+    customerName: details.fullName,
+    customerEmail: details.email,
+    customerPhone: details.whatsapp,
+  });
+  const message = buildNewOrderMessage(order);
+
+  assert.match(orderRoute, /customerName,\s*customerEmail/);
+  assert.match(orderRoute, /storedOrder\.customerPhone = customerPhone/);
+  assert.match(message, /Name: Buyer Name/);
+  assert.match(message, /Email: buyer@example\.test/);
+  assert.match(message, /WhatsApp: \+94771234567/);
 });
 
 test("order without a promo displays no promo and the server-calculated full price", async () => {
