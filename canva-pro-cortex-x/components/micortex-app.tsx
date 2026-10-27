@@ -192,6 +192,7 @@ export default function MicortexAppPremium() {
   const [savedOrderDetails, setSavedOrderDetails] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showAboutCanvaModal, setShowAboutCanvaModal] = useState(false);
+  const [showReferenceHelp, setShowReferenceHelp] = useState(false);
   const [showPaymentDetails, setShowPaymentDetails] = useState(false);
   const [paymentDetails, setPaymentDetails] = useState<PaymentAccountDetails | null>(null);
   const [paymentAccountCopied, setPaymentAccountCopied] = useState(false);
@@ -229,6 +230,8 @@ export default function MicortexAppPremium() {
   const aboutCanvaModalContentRef = useRef<HTMLDivElement>(null);
   const plansSectionRef = useRef<HTMLDivElement>(null);
   const aboutPreviousOverflowRef = useRef<string | null>(null);
+  const referenceHelpButtonRef = useRef<HTMLButtonElement>(null);
+  const referenceHelpCloseRef = useRef<HTMLButtonElement>(null);
 
   const getSubmissionKey = async (kind: "order" | "trial", fingerprint: string) => {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fingerprint));
@@ -338,6 +341,21 @@ export default function MicortexAppPremium() {
       document.body.style.overflow = previousOverflow;
     };
   }, [showAboutCanvaModal]);
+
+  useEffect(() => {
+    if (!showReferenceHelp) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowReferenceHelp(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    referenceHelpCloseRef.current?.focus();
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      referenceHelpButtonRef.current?.focus();
+    };
+  }, [showReferenceHelp]);
 
   const handleCopyPaymentAccount = async () => {
     if (!paymentDetails?.accountNumber) return;
@@ -2110,6 +2128,14 @@ export default function MicortexAppPremium() {
                     onChange={(e) => setPaymentForm({ ...paymentForm, referenceNumber: e.target.value })}
                     className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white placeholder:text-slate-500 focus:border-cyan-400/50 focus:outline-none backdrop-blur-sm"
                   />
+                  <button
+                    ref={referenceHelpButtonRef}
+                    type="button"
+                    onClick={() => setShowReferenceHelp(true)}
+                    className="text-sm font-semibold text-cyan-300 underline decoration-cyan-300/50 underline-offset-4 transition-colors hover:text-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-slate-950"
+                  >
+                    What is a Reference Number?
+                  </button>
 
                   <div>
                     <label className="block rounded-2xl border-2 border-dashed border-cyan-400/30 bg-slate-950/40 p-8 text-center cursor-pointer hover:border-cyan-400/50 transition-all">
@@ -2166,6 +2192,55 @@ export default function MicortexAppPremium() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {showReferenceHelp && (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-md"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setShowReferenceHelp(false);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reference-help-title"
+              onKeyDown={(event) => {
+                if (event.key === "Tab") {
+                  event.preventDefault();
+                  referenceHelpCloseRef.current?.focus();
+                }
+              }}
+              className="relative my-8 max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl border border-cyan-400/30 bg-gradient-to-b from-slate-900/98 to-slate-950/98 p-6 shadow-2xl backdrop-blur-2xl sm:p-8"
+            >
+              <button
+                ref={referenceHelpCloseRef}
+                type="button"
+                aria-label="Close Reference Number help"
+                onClick={() => setShowReferenceHelp(false)}
+                className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 text-xl text-slate-300 transition-all hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-cyan-400"
+              >
+                ×
+              </button>
+              <div className="space-y-6 pr-8 text-sm leading-relaxed text-slate-200">
+                <section>
+                  <h2 id="reference-help-title" className="mb-2 text-lg font-bold text-white">What is a Reference Number?</h2>
+                  <p>A Reference Number is a number used to identify your order. It helps us find your order when you contact us about your payment.</p>
+                  <p className="mt-2">Please enter a Reference Number you would like to use for your order.</p>
+                </section>
+                <section lang="si">
+                  <h3 className="mb-2 text-lg font-bold text-white">Reference Number (යොමු අංකය) යනු කුමක්ද?</h3>
+                  <p>Reference Number එක යනු ඔබගේ ඇණවුම හඳුනාගැනීමට භාවිත කරන අංකයකි. ඔබගේ ගෙවීම සම්බන්ධයෙන් අපව සම්බන්ධ කරගන්නා විට ඔබගේ ඇණවුම සොයාගැනීමට එය උපකාරී වේ.</p>
+                  <p className="mt-2">ඔබගේ ඇණවුම සඳහා භාවිත කිරීමට කැමති Reference Number එකක් ඇතුළත් කරන්න.</p>
+                </section>
+                <section lang="ta">
+                  <h3 className="mb-2 text-lg font-bold text-white">குறிப்பு எண் (Reference Number) என்றால் என்ன?</h3>
+                  <p>குறிப்பு எண் என்பது உங்கள் ஆர்டரை அடையாளம் காணப் பயன்படுத்தப்படும் எண்ணாகும். உங்கள் பணம் செலுத்துதல் தொடர்பாக எங்களைத் தொடர்புகொள்ளும்போது உங்கள் ஆர்டரைக் கண்டறிய இது உதவுகிறது.</p>
+                  <p className="mt-2">உங்கள் ஆர்டருக்குப் பயன்படுத்த விரும்பும் குறிப்பு எண்ணை உள்ளிடவும்.</p>
+                </section>
+              </div>
+            </section>
           </div>
         )}
 
