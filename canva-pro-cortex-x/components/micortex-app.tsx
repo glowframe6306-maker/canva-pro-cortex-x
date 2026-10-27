@@ -345,6 +345,7 @@ export default function MicortexAppPremium() {
   useEffect(() => {
     if (!showReferenceHelp) return;
 
+    const helpButton = referenceHelpButtonRef.current;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setShowReferenceHelp(false);
     };
@@ -353,7 +354,7 @@ export default function MicortexAppPremium() {
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      referenceHelpButtonRef.current?.focus();
+      helpButton?.focus();
     };
   }, [showReferenceHelp]);
 
