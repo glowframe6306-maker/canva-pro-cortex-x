@@ -39,22 +39,50 @@ function loadTelegramMessages() {
   return loaded.exports;
 }
 
+const pricingSource = await readFile(path.join(root, "lib", "pricing.ts"), "utf8");
+let pricingScenario = {};
+const pricingCompiled = ts.transpileModule(pricingSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const pricingModule = { exports: {} };
+const pricingMocks = {
+  "@/components/site-data": { plans: [{ id: "monthly", price: 1000 }] },
+  "@/lib/promotion-database": {
+    getActivePromotion: async () => pricingScenario.promotion || null,
+    getPromotionOfferForPlan: (promotion) => ({
+      promotionalPrice: promotion.price,
+      discountAmount: 1000 - promotion.price,
+    }),
+  },
+  "@/lib/site-settings": {
+    getSiteSettings: async () => ({ discountStacking: Boolean(pricingScenario.discountStacking) }),
+    validatePromoCodeForPlan: async (code, _planId, originalPrice) => {
+      if (code !== pricingScenario.validCode) {
+        return { valid: false, discount: 0, finalPrice: originalPrice, message: "Invalid or expired promo code." };
+      }
+      return {
+        valid: true,
+        discount: pricingScenario.promoDiscount,
+        finalPrice: originalPrice - pricingScenario.promoDiscount,
+        message: "Promo code applied.",
+      };
+    },
+  },
+};
+new Function("require", "module", "exports", pricingCompiled)(
+  (name) => {
+    if (Object.hasOwn(pricingMocks, name)) return pricingMocks[name];
+    throw new Error(`Unexpected dependency in pricing test: ${name}`);
+  },
+  pricingModule,
+  pricingModule.exports,
+);
+const { resolvePlanPricing } = pricingModule.exports;
 const { buildNewOrderMessage } = loadTelegramMessages();
 
-function pricing(overrides = {}) {
-  return {
-    planId: "monthly",
-    mainPrice: 1000,
-    promotionPrice: 1000,
-    promotionDiscount: 0,
-    promoCode: null,
-    promoDiscount: 0,
-    finalPrice: 1000,
-    hasActivePromotion: false,
-    discountStacking: false,
-    priceSource: "main",
-    ...overrides,
-  };
+async function resolvePricing(scenario, code) {
+  pricingScenario = scenario;
+  return resolvePlanPricing("monthly", code);
 }
 
 function telegramOrder(pricingState, overrides = {}) {
@@ -85,13 +113,9 @@ test("checkout submits the promo code and server pricing ignores client totals",
   assert.doesNotMatch(orderRoute, /body\.planPrice/);
 });
 
-test("valid promo order message uses validated promo and final payable price", () => {
-  const order = telegramOrder(pricing({
-    promoCode: "SAVE20",
-    promoDiscount: 200,
-    finalPrice: 800,
-    priceSource: "promo-code",
-  }));
+test("valid promo order message uses validated promo and final payable price", async () => {
+  const state = await resolvePricing({ validCode: "SAVE20", promoDiscount: 200 }, "SAVE20");
+  const order = telegramOrder(state);
   const message = buildNewOrderMessage(order);
 
   assert.match(message, /Main Price: LKR 1,000/);
@@ -101,29 +125,25 @@ test("valid promo order message uses validated promo and final payable price", (
   assert.match(message, /Final Payable Price: LKR 800/);
 });
 
-test("order without a promo displays no promo and the server-calculated full price", () => {
-  const message = buildNewOrderMessage(telegramOrder(pricing()));
+test("order without a promo displays no promo and the server-calculated full price", async () => {
+  const state = await resolvePricing({}, undefined);
+  const message = buildNewOrderMessage(telegramOrder(state));
 
   assert.doesNotMatch(message, /PROMO CODE APPLIED|Promo Code:/);
   assert.match(message, /Discount: LKR 0/);
   assert.match(message, /Final Payable Price: LKR 1,000/);
 });
 
-test("invalid promo is not persisted or shown as applied", () => {
-  const message = buildNewOrderMessage(telegramOrder(pricing()));
+test("invalid promo is not persisted or shown as applied", async () => {
+  const state = await resolvePricing({ validCode: "SAVE20", promoDiscount: 200 }, "INVALID");
+  const message = buildNewOrderMessage(telegramOrder(state));
 
   assert.doesNotMatch(message, /INVALID|PROMO CODE APPLIED|Promo Code:/);
   assert.match(message, /Final Payable Price: LKR 1,000/);
 });
 
-test("promotion-only pricing keeps its existing precedence and total", () => {
-  const state = pricing({
-    promotionPrice: 850,
-    promotionDiscount: 150,
-    finalPrice: 850,
-    hasActivePromotion: true,
-    priceSource: "promotion",
-  });
+test("promotion-only pricing keeps its existing precedence and total", async () => {
+  const state = await resolvePricing({ promotion: { price: 850 } }, undefined);
   const order = telegramOrder(state, { promotionName: "Seasonal" });
   const message = buildNewOrderMessage(order);
 
@@ -135,16 +155,12 @@ test("promotion-only pricing keeps its existing precedence and total", () => {
   assert.match(message, /Final Payable Price: LKR 850/);
 });
 
-test("promotion precedence omits a valid code when the promotion remains the chosen price", () => {
-  const state = pricing({
-    promotionPrice: 800,
-    promotionDiscount: 200,
-    promoCode: "SAVE5",
+test("promotion precedence omits a valid code when the promotion remains the chosen price", async () => {
+  const state = await resolvePricing({
+    promotion: { price: 800 },
+    validCode: "SAVE5",
     promoDiscount: 50,
-    finalPrice: 800,
-    hasActivePromotion: true,
-    priceSource: "promotion",
-  });
+  }, "SAVE5");
   const order = telegramOrder(state, { promotionName: "Seasonal" });
   const message = buildNewOrderMessage(order);
 
@@ -154,17 +170,13 @@ test("promotion precedence omits a valid code when the promotion remains the cho
   assert.doesNotMatch(message, /Promo Code: SAVE5/);
 });
 
-test("stacked promotion reports each validated discount and the final total", () => {
-  const state = pricing({
-    promotionPrice: 900,
-    promotionDiscount: 100,
-    promoCode: "SAVE10",
+test("stacked promotion reports each validated discount and the final total", async () => {
+  const state = await resolvePricing({
+    promotion: { price: 900 },
+    validCode: "SAVE10",
     promoDiscount: 100,
-    finalPrice: 800,
-    hasActivePromotion: true,
     discountStacking: true,
-    priceSource: "stacked",
-  });
+  }, "SAVE10");
   const order = telegramOrder(state, { promotionName: "Seasonal" });
   const message = buildNewOrderMessage(order);
 
