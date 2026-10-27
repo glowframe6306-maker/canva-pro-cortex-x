@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { incrementPromoUsage, validatePromoCodeForPlan } from "@/lib/site-settings";
+import { validatePromoCodeForPlan } from "@/lib/site-settings";
 import { MissingApplicationSettingError } from "@/lib/application-settings-values";
 import { isPromoValidationRequest } from "@/lib/promo-validation-request";
 
@@ -14,10 +14,6 @@ export async function POST(request: NextRequest) {
     }
     const { code, planId, originalPrice } = body;
     const result = await validatePromoCodeForPlan(code, planId, originalPrice);
-
-    if (result.valid) {
-      await incrementPromoUsage(code);
-    }
 
     return NextResponse.json({
       valid: result.valid,

@@ -3,6 +3,13 @@ import {
   saveApplicationSetting,
 } from "@/lib/application-settings-store";
 import { InvalidApplicationSettingError } from "@/lib/application-settings-values";
+import {
+  getPromoCodeDiscountAmount,
+  normalizePromoCode,
+  validatePromoCodeForPlanInList,
+} from "@/lib/promo-code-utils";
+
+export { normalizePromoCode } from "@/lib/promo-code-utils";
 
 export type FeaturedPlanSettings = {
   featuredPlanId: string;
@@ -205,10 +212,6 @@ export async function saveSiteSettings(settings: Partial<SiteSettings>): Promise
   return merged;
 }
 
-export function normalizePromoCode(code: string) {
-  return String(code || "").trim().replace(/\s+/g, "").toUpperCase();
-}
-
 export function validatePromoCodeEntry(promo: Partial<PromoCode>, allPromos: PromoCode[] = []) {
   const code = normalizePromoCode(String(promo.code || ""));
   const name = String(promo.name || "").trim();
@@ -244,92 +247,30 @@ export function validatePromoCodeEntry(promo: Partial<PromoCode>, allPromos: Pro
   return null;
 }
 
-function normalizePlanId(planId: string) {
-  return String(planId || "").trim().toLowerCase();
-}
-
-function isWithinScheduledWindow(promo: PromoCode, now = new Date()) {
-  if (promo.startDate || promo.startTime) {
-    const startText = `${promo.startDate || "1970-01-01"}T${promo.startTime || "00:00"}`;
-    const startAt = new Date(startText);
-    if (!Number.isNaN(startAt.getTime()) && now < startAt) return false;
-  }
-
-  if (promo.expiryDate || promo.expiryTime) {
-    const expiryText = `${promo.expiryDate || "1970-01-01"}T${promo.expiryTime || "23:59"}`;
-    const expiryAt = new Date(expiryText);
-    if (!Number.isNaN(expiryAt.getTime()) && now > expiryAt) return false;
-  }
-
-  return true;
-}
-
-export function getPromoCodeDiscountAmount(originalPrice: number, discountPercentage: number) {
-  const basePrice = Number(originalPrice) || 0;
-  const percentage = Number.isFinite(discountPercentage) ? Math.max(0, Math.min(Number(discountPercentage), 100)) : 0;
-  return Math.min(basePrice, Math.round((basePrice * percentage) / 100));
-}
-
 export async function validatePromoCodeForPlan(code: string, planId: string, originalPrice: number): Promise<{ valid: boolean; discount: number; finalPrice: number; message: string; promo?: PromoCode }> {
   const settings = await getSiteSettings();
-  const normalized = normalizePromoCode(code);
-  const normalizedPlan = normalizePlanId(planId);
-
-  if (!normalized) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "Please enter a promo code." };
-  }
-
-  const promo = settings.promoCodes.find((item) => normalizePromoCode(item.code) === normalized);
-  if (!promo) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "Invalid or expired promo code." };
-  }
-
-  if (!promo.enabled) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "This promo code is currently disabled." };
-  }
-
-  if (!isWithinScheduledWindow(promo)) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "This promo code is not active yet or has expired." };
-  }
-
-  const planList = (promo.applicablePlans || []).map((item) => normalizePlanId(item));
-  if (planList.length > 0 && !planList.includes(normalizedPlan)) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "This promo code is not valid for the selected plan." };
-  }
-
-  const usageLimit = Number(promo.usageLimit ?? 0);
-  if (usageLimit > 0 && Number(promo.usedCount || 0) >= usageLimit) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "This promo code usage limit has been reached." };
-  }
-
-  const discountPercentage = Number(promo.discountPercentage ?? promo.value ?? 0);
-  if (!Number.isFinite(discountPercentage) || discountPercentage < 0 || discountPercentage > 100) {
-    return { valid: false, discount: 0, finalPrice: originalPrice, message: "This promo code discount is invalid." };
-  }
-
-  const discount = getPromoCodeDiscountAmount(originalPrice, discountPercentage);
-  const finalPrice = Math.max(0, originalPrice - discount);
-
-  return {
-    valid: true,
-    discount,
-    finalPrice,
-    message: `${promo.name || promo.code} applied successfully.`,
-    promo,
-  };
+  return validatePromoCodeForPlanInList(code, planId, originalPrice, settings.promoCodes);
 }
 
-export async function incrementPromoUsage(code: string, orderId?: string, planId?: string, originalPrice?: number): Promise<void> {
+export async function incrementPromoUsage(
+  code: string,
+  orderId?: string,
+  planId?: string,
+  originalPrice?: number,
+  appliedDiscountAmount?: number,
+  finalAmount?: number,
+): Promise<void> {
   const settings = await getSiteSettings();
   const normalized = normalizePromoCode(code);
   const promoIndex = settings.promoCodes.findIndex((item) => normalizePromoCode(item.code) === normalized);
   if (promoIndex < 0) return;
 
   const promo = settings.promoCodes[promoIndex];
+  if (orderId && promo.usageHistory?.some((usage) => usage.orderId === orderId)) return;
   const nextUsedCount = (promo.usedCount || 0) + 1;
   const discountPercentage = Number(promo.discountPercentage ?? promo.value ?? 0);
-  const discountAmount = getPromoCodeDiscountAmount(Number(originalPrice || 0), discountPercentage);
-  const finalAmount = Math.max(0, Number(originalPrice || 0) - discountAmount);
+  const discountAmount = appliedDiscountAmount ?? getPromoCodeDiscountAmount(Number(originalPrice || 0), discountPercentage);
+  const acceptedFinalAmount = finalAmount ?? Math.max(0, Number(originalPrice || 0) - discountAmount);
 
   settings.promoCodes[promoIndex] = {
     ...promo,
@@ -345,7 +286,7 @@ export async function incrementPromoUsage(code: string, orderId?: string, planId
         planId: String(planId || ""),
         discountPercentage,
         discountAmount,
-        finalAmount,
+        finalAmount: acceptedFinalAmount,
         usedAt: new Date().toISOString(),
       },
     ],

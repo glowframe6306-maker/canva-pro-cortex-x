@@ -27,8 +27,8 @@ import {
 import { buildNewOrderMessage, buildTrialRequestMessage, buildNextMessage } from "@/lib/telegram-messages";
 import type { StoredOrder } from "@/lib/order-database";
 import { resolvePlanPricing } from "@/lib/pricing";
-import { getActivePromotion } from "@/lib/promotion-database";
 import { getOrderPricingFields } from "@/lib/order-pricing";
+import { incrementPromoUsage } from "@/lib/site-settings";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -116,7 +116,6 @@ export async function POST(request: NextRequest) {
     const selectedPlanKey = String(selectedPlan || "").trim().toLowerCase();
     const enteredPromoCode = String(body.promoCode || body.promo || "").trim();
     const priceState = await resolvePlanPricing(selectedPlanKey, enteredPromoCode || undefined);
-    const activePromotion = await getActivePromotion();
     const orderDateValue = new Date();
     const serverDateTime = getDateTimeInTimezone(orderDateValue);
     const orderDate = String(body.orderDate || orderDateValue.toISOString()).trim();
@@ -246,8 +245,8 @@ export async function POST(request: NextRequest) {
       expiryTime: requestExpiryDateTime.time,
       planType: requestPlanType === "YEARLY" ? "YEARLY" : requestPlanType || undefined,
       duration: requestPlanType ? getPlanDurationDisplay(requestPlanType) : undefined,
-      promotionName: activePromotion?.name || undefined,
-      promotionId: activePromotion?.id || undefined,
+      promotionName: priceState.promotionName,
+      promotionId: priceState.promotionId,
       ...getOrderPricingFields(priceState),
     };
 
@@ -310,6 +309,17 @@ export async function POST(request: NextRequest) {
       storedOrder = persistedSubmission.persisted.order;
     }
 
+    if (!isTrial && storedOrder.promoCode) {
+      await incrementPromoUsage(
+        storedOrder.promoCode,
+        storedOrder.orderId,
+        storedOrder.selectedPlan,
+        storedOrder.mainPrice,
+        storedOrder.promoDiscountAmount,
+        storedOrder.finalPrice,
+      );
+    }
+
     const order: StoredOrder = storedOrder;
     if (!isTrial && fileBuffer) {
       const receiptMime = resolveReceiptMime(finalReceiptName, receiptFile && typeof receiptFile !== "string" ? receiptFile.type || "image/jpeg" : "image/jpeg");
@@ -351,7 +361,7 @@ export async function POST(request: NextRequest) {
         telegramMessageText = buildTrialRequestMessage(storedOrder);
       } else {
         // New order message for paid orders (before activation)
-        telegramMessageText = buildNewOrderMessage(storedOrder);
+        telegramMessageText = buildNewOrderMessage(order);
       }
     } catch (error) {
       console.error("ORDER MESSAGE FORMAT ERROR:", error instanceof Error ? error.name : "UnknownError");

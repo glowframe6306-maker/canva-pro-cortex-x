@@ -7,6 +7,7 @@
 import type { StoredOrder } from "@/lib/order-database";
 import { getPlanDurationDisplay } from "@/lib/expiry-calculator";
 import { getDateTimeInTimezone } from "@/lib/expiry-calculator";
+import { getOrderPricingLines } from "@/lib/order-pricing";
 
 /**
  * Validates that date and time values are present and not TBD
@@ -50,43 +51,6 @@ function subscriptionPlan(order: StoredOrder) {
   const planType = requiredValue(order.planType, "plan type");
   const duration = requiredValue(order.duration || getPlanDurationDisplay(planType), "duration");
   return { planType, duration };
-}
-
-function formatCurrency(amount: number | string | undefined) {
-  const safeValue = Number(amount || 0);
-  return `LKR ${safeValue.toLocaleString("en-LK")}`;
-}
-
-function appendPricingDetails(lines: string[], order: StoredOrder) {
-  const mainPrice = Number(order.mainPrice || order.planPrice || 0) || 0;
-  const finalPrice = Number(order.finalPrice || order.planPrice || mainPrice || 0) || 0;
-  const discountAmount = Number(order.discountAmount || 0) || 0;
-  const discountPercentage = Number(order.discountPercentage || 0) || 0;
-
-  lines.push("", "━━━━━━━━━━━━━━━━━━", "💰 PRICING", "━━━━━━━━━━━━━━━━━━", "");
-  lines.push(`Main Price: ${formatCurrency(mainPrice)}`);
-
-  if (order.discountType === "PROMOTION" || order.discountType === "PROMOTION + PROMO_CODE") {
-    const promotionName = order.promotionName || "Promotion";
-    const promotionPrice = Number(order.promotionPrice || finalPrice || mainPrice || 0);
-    lines.push(`Promotion: ${promotionName}`);
-    lines.push(`Promotion Price: ${formatCurrency(promotionPrice)}`);
-    lines.push(`Discount: ${discountPercentage > 0 ? `${discountPercentage}% OFF` : "0% OFF"}`);
-    lines.push(`You Saved: ${formatCurrency(discountAmount)}`);
-  }
-
-  if (order.discountType === "PROMO_CODE" || order.discountType === "PROMOTION + PROMO_CODE") {
-    const promoCode = order.promoCode || "PROMO";
-    lines.push(`Promo Code: ${promoCode}`);
-    lines.push(`Promo Discount: ${discountPercentage > 0 ? `${discountPercentage}% OFF` : "0% OFF"}`);
-    lines.push(`Discount Amount: ${formatCurrency(discountAmount)}`);
-  }
-
-  if (order.discountType === "NONE") {
-    lines.push("Discount: LKR 0");
-  }
-
-  lines.push(`Final Price: ${formatCurrency(finalPrice)}`);
 }
 
 export function buildSubscriptionReminderMessage(order: StoredOrder, sentAt: Date): string {
@@ -135,51 +99,6 @@ export function buildNewOrderMessage(order: StoredOrder): string {
   const receiptFilename = requiredValue(order.receiptFilename, "payment slip filename");
   if (duration === "N/A") throw new Error("Cannot send Telegram message: Invalid plan duration");
 
-  const lines = [
-    "🚀 NEW CANVA PRO REQUEST",
-    "",
-    "━━━━━━━━━━━━━━━━━━",
-    "📦 PLAN DETAILS",
-    "━━━━━━━━━━━━━━━━━━",
-    "",
-    `Plan: ${plan}`,
-    `Duration: ${duration}`,
-    "",
-    "━━━━━━━━━━━━━━━━━━",
-    "👤 CUSTOMER DETAILS",
-    "━━━━━━━━━━━━━━━━━━",
-    "",
-    `Name: ${customerName}`,
-    `Email: ${customerEmail}`,
-    `WhatsApp: ${customerPhone}`,
-    `Canva Email: ${canvaEmail}`,
-    "",
-    "━━━━━━━━━━━━━━━━━━",
-    "💳 PAYMENT",
-    "━━━━━━━━━━━━━━━━━━",
-    "",
-    `Reference Number: ${paymentDetails}`,
-    `Payment Method: ${order.paymentMethod || "Bank Transfer"}`,
-    `Payment Status: ${order.paymentStatus || "PENDING"}`,
-    `Payment Slip: ${receiptFilename}`,
-    "",
-    "━━━━━━━━━━━━━━━━━━",
-    "🕒 ORDER DETAILS",
-    "━━━━━━━━━━━━━━━━━━",
-    "",
-    `Order ID: ${orderId}`,
-    `Date: ${created.date}`,
-    `Time: ${created.time}`,
-    `Expiry Date: ${expiry.date}`,
-    `Expiry Time: ${expiry.time}`,
-  ];
-
-  if (order.additionalInfo) {
-    lines.push(`Remarks: ${order.additionalInfo}`);
-  }
-
-  appendPricingDetails(lines, order);
-
   const finalLines = [
     "🚀 NEW CANVA PRO REQUEST",
     "",
@@ -192,31 +111,7 @@ export function buildNewOrderMessage(order: StoredOrder): string {
     "",
   ];
 
-  if (order.discountType === "PROMOTION" || order.discountType === "PROMOTION + PROMO_CODE") {
-    finalLines.push("🎁 PROMOTION APPLIED");
-    finalLines.push(`Promotion: ${order.promotionName || "Promotion"}`);
-  }
-
-  if (order.discountType === "PROMO_CODE" || order.discountType === "PROMOTION + PROMO_CODE") {
-    finalLines.push("🎟️ PROMO CODE APPLIED");
-    finalLines.push(`Promo Code: ${order.promoCode || "PROMO"}`);
-  }
-
-  finalLines.push("", "━━━━━━━━━━━━━━━━━━", "💰 PRICING", "━━━━━━━━━━━━━━━━━━", "");
-  finalLines.push(`Main Price: ${formatCurrency(order.mainPrice || order.planPrice || 0)}`);
-  if (order.discountType === "PROMOTION" || order.discountType === "PROMOTION + PROMO_CODE") {
-    finalLines.push(`Promotion Price: ${formatCurrency(order.promotionPrice || order.finalPrice || order.mainPrice || 0)}`);
-    finalLines.push(`Promotion Discount Amount: ${formatCurrency(order.promotionDiscountAmount || 0)}`);
-  }
-  if (order.discountType === "PROMO_CODE" || order.discountType === "PROMOTION + PROMO_CODE") {
-    finalLines.push(`Promo Code: ${order.promoCode || "PROMO"}`);
-    finalLines.push(`Promo Discount Amount: ${formatCurrency(order.promoDiscountAmount || 0)}`);
-  }
-  if (order.discountType === "NONE") {
-    finalLines.push("Discount: LKR 0");
-  }
-  finalLines.push(`Total Discount Amount: ${formatCurrency(order.discountAmount || 0)}`);
-  finalLines.push(`Final Payable Price: ${formatCurrency(order.finalPrice ?? order.planPrice ?? 0)}`);
+  finalLines.push(...getOrderPricingLines(order));
   finalLines.push("", "━━━━━━━━━━━━━━━━━━", "👤 CUSTOMER DETAILS", "━━━━━━━━━━━━━━━━━━", "");
   finalLines.push(`Name: ${customerName}`);
   finalLines.push(`Email: ${customerEmail}`);

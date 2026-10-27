@@ -1,18 +1,10 @@
 import { plans as basePlans } from "@/components/site-data";
 import { getActivePromotion, getPromotionOfferForPlan } from "@/lib/promotion-database";
-import { getSiteSettings, validatePromoCodeForPlan } from "@/lib/site-settings";
+import { getSiteSettings, normalizePromoCode, validatePromoCodeForPlan } from "@/lib/site-settings";
+import { calculatePlanPricing } from "@/lib/pricing-calculation";
 
-export type PricingState = {
+export type PricingState = ReturnType<typeof calculatePlanPricing> & {
   planId: string;
-  mainPrice: number;
-  promotionPrice: number;
-  promotionDiscount: number;
-  promoCode: string | null;
-  promoDiscount: number;
-  finalPrice: number;
-  hasActivePromotion: boolean;
-  discountStacking: boolean;
-  priceSource: "main" | "promotion" | "promo-code" | "stacked";
 };
 
 export function getMainPlanPrice(planId: string) {
@@ -48,52 +40,27 @@ export async function resolvePlanPricing(planId: string, enteredPromoCode?: stri
   const settings = await getSiteSettings();
   const discountStacking = Boolean(settings.discountStacking);
 
-  let finalPrice = mainPrice;
-  let promoDiscount = 0;
-  let promoCode = null;
-  let priceSource: PricingState["priceSource"] = "main";
-
-  if (promotionResult.hasActivePromotion) {
-    finalPrice = promotionResult.promotionPrice;
-    priceSource = "promotion";
-  }
-
   const normalizedCode = String(enteredPromoCode || "").trim();
+  let validatedPromoCode: string | undefined;
+  let validatedPromoDiscount = 0;
   if (normalizedCode) {
     const promoValidation = await validatePromoCodeForPlan(normalizedCode, planKey, mainPrice);
     if (promoValidation.valid) {
-      promoDiscount = promoValidation.discount;
-      promoCode = normalizedCode;
-
-      const promoValuePrice = Math.max(0, mainPrice - promoDiscount);
-      const promotionValuePrice = promotionResult.hasActivePromotion ? promotionResult.promotionPrice : mainPrice;
-
-      if (!discountStacking && promotionResult.hasActivePromotion) {
-        if (promoValuePrice < promotionValuePrice) {
-          finalPrice = promoValuePrice;
-          priceSource = "promo-code";
-        }
-      } else if (discountStacking && promotionResult.hasActivePromotion) {
-        const stackedPrice = Math.max(0, promotionResult.promotionPrice - promoDiscount);
-        finalPrice = stackedPrice;
-        priceSource = "stacked";
-      } else {
-        finalPrice = promoValuePrice;
-        priceSource = "promo-code";
-      }
+      validatedPromoCode = normalizePromoCode(promoValidation.promo?.code || normalizedCode);
+      validatedPromoDiscount = promoValidation.discount;
     }
   }
 
   return {
     planId: planKey,
-    mainPrice,
-    promotionPrice: promotionResult.hasActivePromotion ? promotionResult.promotionPrice : mainPrice,
-    promotionDiscount: promotionResult.promotionDiscount,
-    promoCode,
-    promoDiscount,
-    finalPrice,
-    hasActivePromotion: promotionResult.hasActivePromotion,
-    discountStacking,
-    priceSource,
+    ...calculatePlanPricing({
+      mainPrice,
+      promotionPrice: promotionResult.hasActivePromotion ? promotionResult.promotionPrice : undefined,
+      promotionName: promotion?.name,
+      promotionId: promotion?.id,
+      promoCode: validatedPromoCode,
+      promoDiscount: validatedPromoDiscount,
+      discountStacking,
+    }),
   };
 }
