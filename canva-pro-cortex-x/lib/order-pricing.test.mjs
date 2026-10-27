@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 import { getOrderPricingFields } from "./order-pricing.ts";
+import { getOrderPricingLines } from "./order-pricing.ts";
+import { calculatePlanPricing } from "./pricing-calculation.ts";
+import { validatePromoCodeForPlanInList } from "./promo-code-utils.ts";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const routePath = path.join(root, "app", "api", "orders", "route.ts");
@@ -27,6 +30,7 @@ function loadTelegramMessages() {
       getPlanDurationDisplay: () => "1 month",
       getDateTimeInTimezone: () => ({ date: "2026-10-27", time: "12:00:00" }),
     },
+    "@/lib/order-pricing": { getOrderPricingLines },
   };
   new Function("require", "module", "exports", compiled)(
     (name) => {
@@ -56,6 +60,7 @@ const pricingMocks = {
   },
   "@/lib/site-settings": {
     getSiteSettings: async () => ({ discountStacking: Boolean(pricingScenario.discountStacking) }),
+    normalizePromoCode: (code) => String(code || "").trim().replace(/\s+/g, "").toUpperCase(),
     validatePromoCodeForPlan: async (code, _planId, originalPrice) => {
       if (code !== pricingScenario.validCode) {
         return { valid: false, discount: 0, finalPrice: originalPrice, message: "Invalid or expired promo code." };
@@ -68,6 +73,7 @@ const pricingMocks = {
       };
     },
   },
+  "@/lib/pricing-calculation": { calculatePlanPricing },
 };
 new Function("require", "module", "exports", pricingCompiled)(
   (name) => {
@@ -118,19 +124,21 @@ test("valid promo order message uses validated promo and final payable price", a
   const order = telegramOrder(state);
   const message = buildNewOrderMessage(order);
 
-  assert.match(message, /Main Price: LKR 1,000/);
-  assert.match(message, /🎟️ PROMO CODE APPLIED/);
+  assert.match(message, /Original Price: LKR 1,000/);
   assert.match(message, /Promo Code: SAVE20/);
-  assert.match(message, /Promo Discount Amount: LKR 200/);
+  assert.match(message, /Promo Code Discount Amount: LKR 200/);
+  assert.match(message, /Total Discount Amount: LKR 200/);
   assert.match(message, /Final Payable Price: LKR 800/);
+  assert.match(message, /Currency: LKR/);
 });
 
 test("order without a promo displays no promo and the server-calculated full price", async () => {
   const state = await resolvePricing({}, undefined);
   const message = buildNewOrderMessage(telegramOrder(state));
 
-  assert.doesNotMatch(message, /PROMO CODE APPLIED|Promo Code:/);
-  assert.match(message, /Discount: LKR 0/);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promo Code: None/);
+  assert.match(message, /Total Discount Amount: LKR 0/);
   assert.match(message, /Final Payable Price: LKR 1,000/);
 });
 
@@ -138,7 +146,7 @@ test("invalid promo is not persisted or shown as applied", async () => {
   const state = await resolvePricing({ validCode: "SAVE20", promoDiscount: 200 }, "INVALID");
   const message = buildNewOrderMessage(telegramOrder(state));
 
-  assert.doesNotMatch(message, /INVALID|PROMO CODE APPLIED|Promo Code:/);
+  assert.match(message, /Promo Code: None/);
   assert.match(message, /Final Payable Price: LKR 1,000/);
 });
 
@@ -149,9 +157,9 @@ test("promotion-only pricing keeps its existing precedence and total", async () 
 
   assert.equal(order.discountType, "PROMOTION");
   assert.equal(order.discountAmount, 150);
-  assert.match(message, /🎁 PROMOTION APPLIED/);
+  assert.match(message, /Promotion: Seasonal/);
   assert.match(message, /Promotion Discount Amount: LKR 150/);
-  assert.doesNotMatch(message, /PROMO CODE APPLIED/);
+  assert.match(message, /Promo Code: None/);
   assert.match(message, /Final Payable Price: LKR 850/);
 });
 
@@ -183,7 +191,67 @@ test("stacked promotion reports each validated discount and the final total", as
   assert.equal(order.discountType, "PROMOTION + PROMO_CODE");
   assert.equal(order.discountAmount, 200);
   assert.match(message, /Promotion Discount Amount: LKR 100/);
-  assert.match(message, /Promo Discount Amount: LKR 100/);
+  assert.match(message, /Promo Code Discount Amount: LKR 100/);
   assert.match(message, /Total Discount Amount: LKR 200/);
   assert.match(message, /Final Payable Price: LKR 800/);
+});
+
+test("a better promo code wins when stacking is prohibited", async () => {
+  const state = await resolvePricing({
+    promotion: { price: 900 },
+    validCode: "SAVE20",
+    promoDiscount: 200,
+  }, "SAVE20");
+  const order = telegramOrder(state, { promotionName: "Seasonal" });
+  const message = buildNewOrderMessage(order);
+
+  assert.equal(order.discountType, "PROMO_CODE");
+  assert.equal(order.finalPrice, 800);
+  assert.match(message, /Promotion: None/);
+  assert.match(message, /Promo Code: SAVE20/);
+  assert.match(message, /Total Discount Amount: LKR 200/);
+});
+
+test("expired and usage-limited promo codes cannot apply a discount", () => {
+  const basePromo = {
+    code: "SAVE20",
+    name: "Save 20",
+    enabled: true,
+    applicablePlans: ["monthly"],
+    discountPercentage: 20,
+    usedCount: 0,
+  };
+  const now = new Date("2026-10-27T00:00:00Z");
+  const expired = validatePromoCodeForPlanInList("SAVE20", "monthly", 1000, [{
+    ...basePromo,
+    expiryDate: "2026-10-26",
+    expiryTime: "23:59",
+  }], now);
+  const exhausted = validatePromoCodeForPlanInList("SAVE20", "monthly", 1000, [{
+    ...basePromo,
+    usageLimit: 1,
+    usedCount: 1,
+  }], now);
+
+  assert.equal(expired.valid, false);
+  assert.equal(expired.discount, 0);
+  assert.equal(exhausted.valid, false);
+});
+
+test("notification pricing details match persisted server-computed order fields", async () => {
+  const state = await resolvePricing({
+    promotion: { price: 900 },
+    validCode: "SAVE10",
+    promoDiscount: 100,
+    discountStacking: true,
+  }, "SAVE10");
+  const order = telegramOrder(state, { promotionName: "Seasonal" });
+  const message = buildNewOrderMessage(order);
+
+  assert.equal(order.mainPrice - order.finalPrice, order.discountAmount);
+  assert.equal(order.finalPrice, Number(order.planPrice));
+  assert.match(message, /Original Price: LKR 1,000/);
+  assert.match(message, /Total Discount Amount: LKR 200/);
+  assert.match(message, /Final Payable Price: LKR 800/);
+  assert.match(message, /Currency: LKR/);
 });
