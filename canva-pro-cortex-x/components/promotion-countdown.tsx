@@ -177,7 +177,7 @@ export function PromotionCountdown({ endDate, endTime, onExpired, compact = fals
         ].map(({ label, value }, idx) => (
           <div
             key={idx}
-            className={`rounded-lg border-2 bg-gradient-to-br p-3 text-center transition-all ${
+            className={`flex flex-col items-center justify-center rounded-lg border-2 bg-gradient-to-br p-3 text-center transition-all ${
               countdown.urgencyLevel === "very-urgent"
                 ? "border-red-400/60 from-slate-900/80 to-red-900/40 shadow-lg shadow-red-500/30"
                 : countdown.urgencyLevel === "urgent"
