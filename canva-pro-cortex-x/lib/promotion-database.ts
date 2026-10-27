@@ -325,6 +325,42 @@ export async function getActivePromotion(planId?: string): Promise<Promotion | n
   return null;
 }
 
+export async function getPromotionDiagnostics(planId: string, now = new Date()) {
+  const promotions = await readPromotions();
+  const normalizedPlan = normalizePlanKey(planId);
+  const eligiblePlanIds = new Set<string>();
+  const rejectedPromotions = promotions.flatMap((promotion, index) => {
+    if (!isPromotionActive(promotion, now)) {
+      return [{ index, reason: !promotion.enabled ? "disabled" : "outside_schedule" }];
+    }
+
+    const applicablePlans = promotion.applicablePlans.length ? promotion.applicablePlans : planOrder;
+    if (!applicablePlans.includes(normalizedPlan)) {
+      return [{ index, reason: "plan_not_applicable" }];
+    }
+
+    const entry = promotion.planPrices[normalizedPlan];
+    if (!entry?.enabled) {
+      return [{ index, reason: "plan_price_disabled" }];
+    }
+
+    const offer = getPromotionOfferForPlan(promotion, normalizedPlan);
+    if (!offer?.isDiscounted) {
+      return [{ index, reason: "no_discount_for_plan" }];
+    }
+
+    eligiblePlanIds.add(normalizedPlan);
+    return [];
+  });
+
+  return {
+    promotionCount: promotions.length,
+    activePromotionCount: promotions.filter((promotion) => isPromotionActive(promotion, now)).length,
+    eligiblePlanIds: Array.from(eligiblePlanIds),
+    rejectedPromotions,
+  };
+}
+
 export async function getAllPromotions(): Promise<Promotion[]> {
   return readPromotions();
 }

@@ -70,7 +70,9 @@ new Function("require", "module", "exports", promotionDatabaseCompiled)(
           if (configuredPromotions === undefined) throw new MissingApplicationSettingError("promotions");
           return configuredPromotions;
         },
-        saveApplicationSetting: async () => {},
+        saveApplicationSetting: async (key, value) => {
+          if (key === "promotions") configuredPromotions = value;
+        },
       };
     }
     if (name === "@/lib/application-settings-values") return { InvalidApplicationSettingError };
@@ -79,7 +81,12 @@ new Function("require", "module", "exports", promotionDatabaseCompiled)(
   promotionDatabaseModule,
   promotionDatabaseModule.exports,
 );
-const { getActivePromotion, getPromotionOfferForPlan } = promotionDatabaseModule.exports;
+const {
+  createPromotion,
+  getActivePromotion,
+  getPromotionDiagnostics,
+  getPromotionOfferForPlan,
+} = promotionDatabaseModule.exports;
 const pricingCompiled = ts.transpileModule(pricingSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
@@ -340,6 +347,65 @@ test("the selected plan's promotion is found even when an earlier active promoti
   assert.equal(order.finalPrice, 800);
   assert.match(message, /Promotion: Monthly Offer/);
   assert.match(message, /Final Payable Price: LKR 800/);
+});
+
+test("admin-save payload is persisted and resolved from the promotions setting in the order path", async () => {
+  configuredPromotions = [];
+  const monthlyPlan = basePlans.find((plan) => plan.id === "monthly");
+  assert.ok(monthlyPlan);
+  const originalPrice = monthlyPlan.price;
+  monthlyPlan.price = 500;
+  try {
+    const saved = await createPromotion({
+      name: "Admin Fixture",
+      enabled: true,
+      startDate: "",
+      startTime: "",
+      endDate: "",
+      endTime: "",
+      applicablePlans: ["monthly"],
+      planPrices: {
+        weekly: { promotionalPrice: 200, enabled: true },
+        monthly: { promotionalPrice: 400, enabled: true },
+        annually: { promotionalPrice: 2000, enabled: true },
+        lifetime: { promotionalPrice: 5000, enabled: true },
+      },
+    });
+
+    assert.equal(configuredPromotions.length, 1);
+    assert.equal(configuredPromotions[0].name, "Admin Fixture");
+    assert.deepEqual(configuredPromotions[0].applicablePlans, ["monthly"]);
+    assert.equal(configuredPromotions[0].planPrices.monthly.promotionalPrice, 400);
+    assert.equal((await getActivePromotion("monthly"))?.id, saved.id);
+
+    const diagnostics = await getPromotionDiagnostics("monthly");
+    assert.equal(diagnostics.promotionCount, 1);
+    assert.equal(diagnostics.activePromotionCount, 1);
+    assert.deepEqual(diagnostics.eligiblePlanIds, ["monthly"]);
+    assert.deepEqual(diagnostics.rejectedPromotions, []);
+
+    pricingScenario = {};
+    const pricing = await resolvePlanPricing("monthly");
+    const order = telegramOrder(pricing);
+    const message = buildNewOrderMessage(order);
+    assert.equal(order.mainPrice, 500);
+    assert.equal(order.finalPrice, 400);
+    assert.match(message, /Promotion: Admin Fixture/);
+    assert.match(message, /Promotion Discount Amount: LKR 100/);
+    assert.match(message, /Final Payable Price: LKR 400/);
+  } finally {
+    monthlyPlan.price = originalPrice;
+  }
+});
+
+test("local promotion diagnostics identify a saved campaign that excludes the selected plan", async () => {
+  configuredPromotions = [makePromotion({ price: 400, applicablePlans: ["weekly"] })];
+  const diagnostics = await getPromotionDiagnostics("monthly");
+
+  assert.equal(diagnostics.promotionCount, 1);
+  assert.equal(diagnostics.activePromotionCount, 1);
+  assert.deepEqual(diagnostics.eligiblePlanIds, []);
+  assert.deepEqual(diagnostics.rejectedPromotions, [{ index: 0, reason: "plan_not_applicable" }]);
 });
 
 test("notification pricing details match persisted server-computed order fields", async () => {
