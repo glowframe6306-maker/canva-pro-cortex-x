@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MI CORTEX X INC. | Digital Access Plans",
+  title: "CANVA PRO | MI CORTEX X INC.",
   description: "MI CORTEX X INC. — Premium digital access plans with simple and secure ordering.",
   metadataBase: new URL("https://canva-pro-cortex-x.vercel.app"),
   openGraph: {
