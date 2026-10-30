@@ -17,6 +17,9 @@ export const metadata: Metadata = {
   title: "CANVA PRO | MI CORTEX X INC.",
   description: "MI CORTEX X INC. — Premium digital access plans with simple and secure ordering.",
   metadataBase: new URL("https://canva-pro-cortex-x.vercel.app"),
+  verification: {
+    google: "elcWCfjeiJG7W67HAjiX2Zg5AGVFmblOwsPSFTf9jLQ",
+  },
   openGraph: {
     title: "MI CORTEX X INC. | Digital Access Plans",
     description: "Premium digital access plans with simple and secure ordering.",
