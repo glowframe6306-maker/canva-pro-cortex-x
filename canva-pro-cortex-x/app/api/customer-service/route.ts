@@ -4,11 +4,11 @@ import {
   createCustomerServiceSubmissionHandler,
   logCustomerServiceFailure,
 } from "@/lib/customer-service-submission";
-import { getDateTimeInTimezone } from "@/lib/expiry-calculator";
+import { getDateTimeInTimezone, resolveApplicationTimezone } from "@/lib/expiry-calculator";
 
 const CUSTOMER_SERVICE_BOT_TOKEN = process.env.CUSTOMER_SERVICE_BOT_TOKEN;
 const CUSTOMER_SERVICE_CHAT_ID = process.env.CUSTOMER_SERVICE_CHAT_ID;
-const TIMEZONE = process.env.TZ || "Asia/Colombo";
+const TIMEZONE = resolveApplicationTimezone(process.env.TZ);
 
 const submitCustomerServiceRequest = createCustomerServiceSubmissionHandler({
   botToken: CUSTOMER_SERVICE_BOT_TOKEN,

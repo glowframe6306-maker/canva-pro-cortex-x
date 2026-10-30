@@ -22,6 +22,7 @@ export type CustomerServiceRequestIdPhase =
   | "DATABASE_CLIENT"
   | "SEQUENCE_QUERY"
   | "SEQUENCE_RESULT"
+  | "DATE_FORMATTER"
   | "DATE_FORMAT";
 
 export class CustomerServiceRequestIdPhaseError extends Error {
@@ -60,12 +61,15 @@ export function createCustomerServiceStore(getClient: QueryableFactory) {
         return value;
       });
 
-      const dateStamp = await runInRequestIdPhase("DATE_FORMAT", () => new Intl.DateTimeFormat("en-CA", {
+      const formatter = await runInRequestIdPhase("DATE_FORMATTER", () => new Intl.DateTimeFormat("en-CA", {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
         timeZone,
-      }).format(date).replace(/-/g, ""));
+      }));
+      const dateStamp = await runInRequestIdPhase("DATE_FORMAT", () =>
+        formatter.format(date).replace(/-/g, ""),
+      );
       return `CS-${dateStamp}-${nextId.padStart(4, "0")}`;
     },
 

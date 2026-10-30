@@ -6,8 +6,10 @@ import {
   CustomerServiceOperationError,
   getCustomerServiceErrorDiagnostic,
 } from "./customer-service-submission.ts";
+import { resolveApplicationTimezone } from "./expiry-calculator.ts";
 
 const requestDate = new Date("2026-03-04T00:00:00.000Z");
+const boundaryRequestDate = new Date("2026-03-04T20:00:00.000Z");
 
 async function assertRequestIdPhase(promise, phase, causeClass, sqlState) {
   await assert.rejects(promise, (error) => {
@@ -36,9 +38,9 @@ test("customer service request IDs use the PostgreSQL identity sequence and conf
     },
   }));
 
-  const requestId = await store.generateRequestId(requestDate, "Asia/Colombo");
+  const requestId = await store.generateRequestId(boundaryRequestDate, "Asia/Colombo");
 
-  assert.equal(requestId, "CS-20260304-0027");
+  assert.equal(requestId, "CS-20260305-0027");
   assert.match(calls[0].statement, /nextval\(pg_get_serial_sequence\('customer_service_requests', 'id'\)\)/);
 });
 
@@ -77,7 +79,7 @@ test("request-ID generation reports invalid sequence results separately", async 
   await assertRequestIdPhase(store.generateRequestId(requestDate, "UTC"), "SEQUENCE_RESULT", Error);
 });
 
-test("request-ID generation reports the date-format phase", async () => {
+test("request-ID generation reports formatter-construction failures separately", async () => {
   const store = createCustomerServiceStore(() => ({
     async query() {
       return [{ next_id: "27" }];
@@ -86,6 +88,60 @@ test("request-ID generation reports the date-format phase", async () => {
 
   await assertRequestIdPhase(
     store.generateRequestId(requestDate, "Invalid/Timezone"),
+    "DATE_FORMATTER",
+    RangeError,
+  );
+});
+
+test("request-ID generation falls back to the application timezone for an invalid timezone", async () => {
+  const store = createCustomerServiceStore(() => ({
+    async query() {
+      return [{ next_id: "27" }];
+    },
+  }));
+
+  const requestId = await store.generateRequestId(
+    boundaryRequestDate,
+    resolveApplicationTimezone("Invalid/Timezone"),
+  );
+
+  assert.equal(requestId, "CS-20260305-0027");
+});
+
+test("request-ID generation uses the application fallback when timezone is missing", async () => {
+  const originalTimezone = process.env.TZ;
+  delete process.env.TZ;
+  try {
+    const store = createCustomerServiceStore(() => ({
+      async query() {
+        return [{ next_id: "27" }];
+      },
+    }));
+
+    const requestId = await store.generateRequestId(
+      boundaryRequestDate,
+      resolveApplicationTimezone(undefined),
+    );
+
+    assert.equal(requestId, "CS-20260305-0027");
+  } finally {
+    if (originalTimezone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = originalTimezone;
+    }
+  }
+});
+
+test("request-ID generation reports invalid dates as date-format failures", async () => {
+  const store = createCustomerServiceStore(() => ({
+    async query() {
+      return [{ next_id: "27" }];
+    },
+  }));
+
+  await assertRequestIdPhase(
+    store.generateRequestId(new Date(Number.NaN), "UTC"),
     "DATE_FORMAT",
     RangeError,
   );

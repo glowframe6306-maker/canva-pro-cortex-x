@@ -65,6 +65,7 @@ function isCustomerServiceRequestIdPhase(value: unknown): value is CustomerServi
   return value === "DATABASE_CLIENT"
     || value === "SEQUENCE_QUERY"
     || value === "SEQUENCE_RESULT"
+    || value === "DATE_FORMATTER"
     || value === "DATE_FORMAT";
 }
 
