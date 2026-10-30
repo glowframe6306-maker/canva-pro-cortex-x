@@ -9,19 +9,20 @@ import {
 
 const requestDate = new Date("2026-03-04T00:00:00.000Z");
 
-async function assertRequestIdPhase(promise, phase, causeClass) {
+async function assertRequestIdPhase(promise, phase, causeClass, sqlState) {
   await assert.rejects(promise, (error) => {
     assert.ok(error instanceof CustomerServiceRequestIdPhaseError);
     assert.equal(error.cause.constructor, causeClass);
-    assert.deepEqual(
-      getCustomerServiceErrorDiagnostic(new CustomerServiceOperationError("PERSISTENCE", error, "REQUEST_ID")),
-      {
-        category: "PERSISTENCE",
-        stage: "REQUEST_ID",
-        errorClass: causeClass.name,
-        phase,
-      },
+    const diagnostic = getCustomerServiceErrorDiagnostic(
+      new CustomerServiceOperationError("PERSISTENCE", error, "REQUEST_ID"),
     );
+    assert.deepEqual(diagnostic, {
+      category: "PERSISTENCE",
+      stage: "REQUEST_ID",
+      errorClass: causeClass.name,
+      phase,
+      ...(sqlState ? { sqlState } : {}),
+    });
     return true;
   });
 }
@@ -51,14 +52,19 @@ test("request-ID generation reports the database-client creation phase", async (
 });
 
 test("request-ID generation reports the sequence-query phase", async () => {
-  const cause = new RangeError("private query error");
+  const cause = Object.assign(new RangeError("private query error"), { code: "23505" });
   const store = createCustomerServiceStore(() => ({
     async query() {
       throw cause;
     },
   }));
 
-  await assertRequestIdPhase(store.generateRequestId(requestDate, "UTC"), "SEQUENCE_QUERY", RangeError);
+  await assertRequestIdPhase(
+    store.generateRequestId(requestDate, "UTC"),
+    "SEQUENCE_QUERY",
+    RangeError,
+    "23505",
+  );
 });
 
 test("request-ID generation reports invalid sequence results separately", async () => {
