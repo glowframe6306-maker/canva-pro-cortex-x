@@ -2502,6 +2502,18 @@ export default function MicortexAppPremium() {
               <p className="text-xs text-slate-400 text-center md:text-left">© 2026 MI CORTEX X INC. All Rights Reserved.</p>
               <p className="text-xs font-semibold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">All Rights Reserved by MI CORTEX X</p>
             </div>
+
+            <div className="mt-6 flex justify-center">
+              <a
+                href={`https://wa.me/94756390621?text=${encodeURIComponent("Hello 👋\n\nI want to create an app, website, or something similar. Could you guide me on how to get started?")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Contact MI CORTEX X INC. on WhatsApp"
+                className="inline-flex max-w-full items-center justify-center rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-center text-xs font-medium tracking-wide text-slate-400 transition-all duration-300 hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] hover:text-cyan-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+              >
+                BUILD AND DEVELOPED BY MI CORTEX X INC.
+              </a>
+            </div>
           </div>
         </footer>
       </div>
