@@ -1,4 +1,7 @@
-import type { CustomerServiceRequest } from "@/lib/customer-service-store";
+import type {
+  CustomerServiceRequest,
+  CustomerServiceRequestIdPhase,
+} from "@/lib/customer-service-store";
 
 const REASONS = new Set([
   "Account / Access Issue",
@@ -50,11 +53,19 @@ export type CustomerServiceErrorDiagnostic = {
   category: "TELEGRAM" | "PERSISTENCE" | "REQUEST";
   stage: string;
   errorClass: string;
+  phase?: CustomerServiceRequestIdPhase;
   sqlState?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isCustomerServiceRequestIdPhase(value: unknown): value is CustomerServiceRequestIdPhase {
+  return value === "DATABASE_CLIENT"
+    || value === "SEQUENCE_QUERY"
+    || value === "SEQUENCE_RESULT"
+    || value === "DATE_FORMAT";
 }
 
 export function getCustomerServiceErrorDiagnostic(error: unknown): CustomerServiceErrorDiagnostic {
@@ -66,15 +77,22 @@ export function getCustomerServiceErrorDiagnostic(error: unknown): CustomerServi
     : "REQUEST";
   let current: unknown = error instanceof CustomerServiceOperationError ? error.cause : error;
   let errorClass = "Error";
+  let phase: CustomerServiceRequestIdPhase | undefined;
   let sqlState: string | undefined;
 
   for (let depth = 0; depth < 5 && current; depth += 1) {
     if (isRecord(current)) {
+      const currentPhase = current.phase;
+      const isPhaseError = isCustomerServiceRequestIdPhase(currentPhase);
+      if (!phase && isPhaseError) {
+        phase = currentPhase;
+      }
       if (
-        depth === 0
+        !isPhaseError
         && current instanceof Error
         && typeof current.constructor.name === "string"
         && /^[A-Za-z][A-Za-z0-9_]{0,59}$/.test(current.constructor.name)
+        && errorClass === "Error"
       ) {
         errorClass = current.constructor.name;
       }
@@ -87,7 +105,13 @@ export function getCustomerServiceErrorDiagnostic(error: unknown): CustomerServi
     }
   }
 
-  return { category, stage, errorClass, ...(sqlState ? { sqlState } : {}) };
+  return {
+    category,
+    stage,
+    errorClass,
+    ...(phase ? { phase } : {}),
+    ...(sqlState ? { sqlState } : {}),
+  };
 }
 
 export function logCustomerServiceFailure(error: unknown): void {

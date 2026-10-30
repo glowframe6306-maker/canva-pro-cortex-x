@@ -5,7 +5,7 @@ import type { CustomerServiceRequest } from "@/lib/customer-service-store";
 export type { CustomerServiceRequest } from "@/lib/customer-service-store";
 
 function getStore() {
-  return createCustomerServiceStore(getPostgresClient());
+  return createCustomerServiceStore(getPostgresClient);
 }
 
 export function generateCustomerServiceRequestId(date: Date, timeZone: string): Promise<string> {
