@@ -12,6 +12,7 @@ const REASONS = new Set([
 ]);
 
 type TelegramResult = { httpOk: boolean; payload: unknown };
+type CustomerServiceOperationStage = "REQUEST_ID" | "TELEGRAM" | "PERSISTENCE";
 type SubmissionResponse = {
   status: number;
   body: Record<string, unknown>;
@@ -31,12 +32,66 @@ type CustomerServiceDependencies = {
 
 export class CustomerServiceOperationError extends Error {
   readonly category: "TELEGRAM" | "PERSISTENCE";
+  readonly stage: CustomerServiceOperationStage;
 
-  constructor(category: "TELEGRAM" | "PERSISTENCE", cause: unknown) {
+  constructor(
+    category: "TELEGRAM" | "PERSISTENCE",
+    cause: unknown,
+    stage: CustomerServiceOperationStage = category,
+  ) {
     super("Customer service request processing failed.", { cause });
     this.name = "CustomerServiceOperationError";
     this.category = category;
+    this.stage = stage;
   }
+}
+
+export type CustomerServiceErrorDiagnostic = {
+  category: "TELEGRAM" | "PERSISTENCE" | "REQUEST";
+  stage: string;
+  errorClass: string;
+  sqlState?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function getCustomerServiceErrorDiagnostic(error: unknown): CustomerServiceErrorDiagnostic {
+  const category = error instanceof CustomerServiceOperationError
+    ? error.category
+    : "REQUEST";
+  const stage = error instanceof CustomerServiceOperationError
+    ? error.stage
+    : "REQUEST";
+  let current: unknown = error instanceof CustomerServiceOperationError ? error.cause : error;
+  let errorClass = "Error";
+  let sqlState: string | undefined;
+
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (isRecord(current)) {
+      if (
+        depth === 0
+        && current instanceof Error
+        && typeof current.constructor.name === "string"
+        && /^[A-Za-z][A-Za-z0-9_]{0,59}$/.test(current.constructor.name)
+      ) {
+        errorClass = current.constructor.name;
+      }
+      if (!sqlState && typeof current.code === "string" && /^[0-9A-Z]{5}$/.test(current.code)) {
+        sqlState = current.code;
+      }
+      current = current.cause;
+    } else {
+      current = undefined;
+    }
+  }
+
+  return { category, stage, errorClass, ...(sqlState ? { sqlState } : {}) };
+}
+
+export function logCustomerServiceFailure(error: unknown): void {
+  console.error("CUSTOMER_SERVICE_FAILURE", getCustomerServiceErrorDiagnostic(error));
 }
 
 function escapeMarkdown(text: string) {
@@ -83,7 +138,7 @@ export function createCustomerServiceSubmissionHandler(dependencies: CustomerSer
     try {
       requestId = await dependencies.generateRequestId(createdAt, dependencies.timeZone);
     } catch (error) {
-      throw new CustomerServiceOperationError("PERSISTENCE", error);
+      throw new CustomerServiceOperationError("PERSISTENCE", error, "REQUEST_ID");
     }
 
     const serviceRequest: CustomerServiceRequest = {
@@ -149,7 +204,7 @@ export function createCustomerServiceSubmissionHandler(dependencies: CustomerSer
     try {
       await dependencies.saveRequest(serviceRequest);
     } catch (error) {
-      throw new CustomerServiceOperationError("PERSISTENCE", error);
+      throw new CustomerServiceOperationError("PERSISTENCE", error, "PERSISTENCE");
     }
     return {
       status: 200,

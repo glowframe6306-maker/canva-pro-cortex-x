@@ -17,6 +17,7 @@ test("customer service migration validates an existing relation before creating 
   assert.ok(migration.includes("v_relkind <> 'r'"));
   assert.ok(migration.includes("v_column_count <> 4"));
   assert.ok(migration.includes("v_constraint_count <> 3"));
+  assert.match(migration, /c\.conrelid = v_relation\s+AND c\.contype <> 'n'/);
   assert.ok(migration.includes("id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY"));
   assert.ok(migration.includes("request_id text NOT NULL UNIQUE"));
   assert.ok(migration.includes("request_data jsonb NOT NULL CHECK (jsonb_typeof(request_data) = 'object')"));

@@ -29,7 +29,8 @@ BEGIN
 
     SELECT count(*) INTO v_constraint_count
       FROM pg_catalog.pg_constraint AS c
-     WHERE c.conrelid = v_relation;
+     WHERE c.conrelid = v_relation
+       AND c.contype <> 'n';
 
     SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid)
       INTO v_created_at_default

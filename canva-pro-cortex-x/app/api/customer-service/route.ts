@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateCustomerServiceRequestId, saveCustomerServiceRequest } from "@/lib/customer-service-database";
-import { createCustomerServiceSubmissionHandler, CustomerServiceOperationError } from "@/lib/customer-service-submission";
+import {
+  createCustomerServiceSubmissionHandler,
+  logCustomerServiceFailure,
+} from "@/lib/customer-service-submission";
 import { getDateTimeInTimezone } from "@/lib/expiry-calculator";
 
 const CUSTOMER_SERVICE_BOT_TOKEN = process.env.CUSTOMER_SERVICE_BOT_TOKEN;
@@ -32,7 +35,6 @@ const submitCustomerServiceRequest = createCustomerServiceSubmissionHandler({
 });
 
 export async function POST(request: NextRequest) {
-  let stage = "REQUEST";
   try {
     const body = await request.json();
     const result = await submitCustomerServiceRequest(body);
@@ -41,10 +43,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
-    if (error instanceof CustomerServiceOperationError) {
-      stage = error.category;
-    }
-    console.error(`CUSTOMER SERVICE ${stage} ERROR:`, error instanceof Error ? error.name : "Unknown error");
+    logCustomerServiceFailure(error);
     return NextResponse.json({ ok: false, error: "Unable to send your request right now. Please try again." }, { status: 500 });
   }
 }

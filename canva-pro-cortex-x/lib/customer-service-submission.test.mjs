@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   createCustomerServiceSubmissionHandler,
   CustomerServiceOperationError,
+  getCustomerServiceErrorDiagnostic,
+  logCustomerServiceFailure,
 } from "./customer-service-submission.ts";
 
 const requestBody = {
@@ -14,6 +16,8 @@ const requestBody = {
   reason: "Other",
   message: "Test-only request",
 };
+
+class NeonDbError extends Error {}
 
 function createDependencies(overrides = {}) {
   const events = [];
@@ -100,7 +104,7 @@ test("request-ID and persistence failures are categorized separately from Telegr
     },
   });
   await assert.rejects(idFailure.submit(requestBody), (error) =>
-    error instanceof CustomerServiceOperationError && error.category === "PERSISTENCE",
+    error instanceof CustomerServiceOperationError && error.category === "PERSISTENCE" && error.stage === "REQUEST_ID",
   );
 
   const saveFailure = createDependencies({
@@ -109,8 +113,79 @@ test("request-ID and persistence failures are categorized separately from Telegr
     },
   });
   await assert.rejects(saveFailure.submit(requestBody), (error) =>
-    error instanceof CustomerServiceOperationError && error.category === "PERSISTENCE",
+    error instanceof CustomerServiceOperationError && error.category === "PERSISTENCE" && error.stage === "PERSISTENCE",
   );
+});
+
+test("database error diagnostics expose SQLSTATE and stage without logging error messages or request data", () => {
+  const databaseError = Object.assign(
+    new NeonDbError("email customer@example.test, password secret-value"),
+    { code: "23502", cause: Object.assign(new Error("private underlying details"), { code: "XX000" }) },
+  );
+  const error = new CustomerServiceOperationError("PERSISTENCE", databaseError, "PERSISTENCE");
+
+  const diagnostic = getCustomerServiceErrorDiagnostic(error);
+
+  assert.deepEqual(diagnostic, {
+    category: "PERSISTENCE",
+    stage: "PERSISTENCE",
+    errorClass: "NeonDbError",
+    sqlState: "23502",
+  });
+  assert.doesNotMatch(JSON.stringify(diagnostic), /customer@example\.test|secret-value|private underlying details/);
+});
+
+test("customer-service diagnostics log only fixed metadata for a wrapped request-ID failure", async () => {
+  const requestId = "CS-private-request-id";
+  const cause = Object.assign(
+    new NeonDbError(`Sensitive details: ${JSON.stringify({ requestId, ...requestBody })}; private-message-sentinel`),
+    { code: "23502", stack: `private stack ${JSON.stringify(requestBody)}` },
+  );
+  const { submit } = createDependencies({
+    async generateRequestId() {
+      throw cause;
+    },
+  });
+  let wrapped;
+  await assert.rejects(submit(requestBody), (error) => {
+    wrapped = error;
+    return error instanceof CustomerServiceOperationError
+      && error.category === "PERSISTENCE"
+      && error.stage === "REQUEST_ID";
+  });
+  assert.equal(wrapped.cause, cause);
+
+  const originalConsoleError = console.error;
+  const loggedArguments = [];
+  console.error = (...args) => loggedArguments.push(args);
+
+  try {
+    logCustomerServiceFailure(wrapped);
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(loggedArguments.length, 1);
+  assert.equal(loggedArguments[0][0], "CUSTOMER_SERVICE_FAILURE");
+  assert.deepEqual(loggedArguments[0][1], {
+    category: "PERSISTENCE",
+    stage: "REQUEST_ID",
+    errorClass: "NeonDbError",
+    sqlState: "23502",
+  });
+  for (const sensitiveValue of [requestId, ...Object.values(requestBody), "private-message-sentinel", "private stack"]) {
+    assert.equal(JSON.stringify(loggedArguments).includes(sensitiveValue), false);
+  }
+});
+test("request diagnostics reject unsafe error codes and identify the request-ID stage", () => {
+  const cause = Object.assign(new Error("private"), { code: "NOT A SQLSTATE" });
+  const error = new CustomerServiceOperationError("PERSISTENCE", cause, "REQUEST_ID");
+
+  assert.deepEqual(getCustomerServiceErrorDiagnostic(error), {
+    category: "PERSISTENCE",
+    stage: "REQUEST_ID",
+    errorClass: "Error",
+  });
 });
 
 test("missing Telegram configuration keeps the existing 503 response", async () => {
